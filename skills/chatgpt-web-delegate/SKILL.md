@@ -1,6 +1,6 @@
 ---
 name: chatgpt-web-delegate
-description: Use when a local Codex/OMP agent should delegate thinking, planning, architecture review, root-cause second opinions, or independent code review to visible ChatGPT Web while keeping repository investigation, edits, commands, tests, Git and deployment local. In ORCA, a positive delegation decision MUST trigger the built-in browser through the Orca CLI instead of stopping at a recommendation to consult ChatGPT. Supports Codex Desktop browser bridges, ORCA built-in browser commands, and shell browser fallbacks. Includes bounded autonomous delegation and submit-once waiting for long ChatGPT responses.
+description: Use when a local Codex/OMP agent should delegate thinking, planning, architecture review, root-cause second opinions, or independent code review to visible ChatGPT Web while keeping repository investigation, edits, commands, tests, Git and deployment local. In ORCA, a positive delegation decision MUST trigger the built-in browser through the Orca CLI instead of stopping at a recommendation to consult ChatGPT. Supports Codex Desktop browser bridges, ORCA built-in browser commands with runtime disconnect recovery, and shell browser fallbacks. Includes bounded autonomous delegation and submit-once waiting for long ChatGPT responses.
 ---
 
 # ChatGPT Web Delegate
@@ -173,6 +173,51 @@ If no supported browser is available, report `browser_provider_unavailable`. Con
 
 This protocol is mandatory when running under ORCA and `orca status --json` succeeds.
 
+### Runtime guard before browser work
+
+Before the first browser mutation, confirm the runtime is reachable:
+
+```bash
+orca status --json
+```
+
+If a command reports a runtime/transport disconnect, do not spam retries. Recover the runtime first, for example:
+
+```bash
+orca open --json
+orca status --json
+```
+
+Then reacquire the ChatGPT tab and take a **fresh snapshot** before deciding what to do next.
+
+Treat browser actions as three risk classes:
+
+```text
+READ
+  status / tab list / snapshot / wait
+  -> safe to retry after runtime recovery
+
+MUTATION
+  tab create / goto / fill / ordinary click
+  -> result may already have applied
+  -> reobserve before retry
+
+HIGH-RISK MUTATION
+  click ChatGPT Send
+  -> result may already have submitted the prompt
+  -> NEVER blindly retry
+```
+
+After any runtime reconnect, navigation, tab replacement/switch, major rerender, or stale-ref error, discard all old element refs such as `@e12`. Use refs only from a new `orca snapshot`.
+
+The governing rule is:
+
+```text
+unknown != failed
+```
+
+Detailed rationale is in `docs/ORCA_RUNTIME_RECOVERY.md`.
+
 ### 1. Open the embedded browser
 
 First inspect existing tabs:
@@ -195,6 +240,8 @@ orca goto --url https://chatgpt.com/ --worktree active --json
 
 The `orca tab create` / `orca goto` command is the step that **actually opens Orca's built-in browser**. Do not replace it with a prose recommendation.
 
+If runtime disconnects during `tab create` or `goto`, recover runtime, list tabs, and snapshot before retrying. The navigation may already have happened.
+
 ### 2. Inspect before acting
 
 Always snapshot before interacting:
@@ -203,7 +250,7 @@ Always snapshot before interacting:
 orca snapshot --worktree active --json
 ```
 
-Use element refs such as `@e1`, `@e2`, ... from the **latest** snapshot. Re-snapshot after navigation, tab changes, significant clicks, or stale-ref errors.
+Use element refs such as `@e1`, `@e2`, ... from the **latest** snapshot. Re-snapshot after navigation, tab changes, significant clicks, runtime reconnect, or stale-ref errors.
 
 If the snapshot shows login, captcha, OTP, workspace/account selection, or another human-only blocker, stop and ask the user to complete it. Do not bypass it.
 
@@ -223,6 +270,17 @@ Re-snapshot after filling if necessary:
 orca snapshot --worktree active --json
 ```
 
+If runtime/transport disconnects during `fill`:
+
+1. recover runtime;
+2. reacquire the same ChatGPT tab;
+3. take a fresh snapshot;
+4. inspect the composer.
+
+If the full prompt is already present, **do not fill again**. Continue to Send using a fresh element ref.
+
+Only retry `fill` when a fresh snapshot clearly shows the prompt is absent. If the state is ambiguous, observe again instead of mutating.
+
 ### 4. Submit exactly once
 
 Identify the visible Send control from the latest snapshot and click it:
@@ -238,6 +296,50 @@ submitted = true
 ```
 
 From this point onward, **never automatically fill/click Send again for the same consultation**.
+
+#### If runtime disconnects during or immediately after Send
+
+A transport error does **not** prove Send failed.
+
+Do not click Send again immediately. Instead:
+
+```text
+recover runtime
+-> reacquire same ChatGPT tab/thread
+-> fresh snapshot
+-> reconcile actual page state
+```
+
+Treat the consultation as submitted if any strong sent evidence is visible:
+
+- the user's consultation message is present in the conversation;
+- ChatGPT is thinking/streaming/generating;
+- an assistant answer has started or completed.
+
+Then record:
+
+```text
+submitted = true
+```
+
+and continue waiting. Never resend.
+
+A single Send retry is allowed only when a **fresh** observation clearly proves all of the following:
+
+- the consultation prompt is still present in the composer as a draft;
+- the user message is not present in the conversation;
+- ChatGPT is not generating;
+- no assistant answer for that consultation exists.
+
+Reacquire the current Send ref and click once.
+
+If the result is ambiguous:
+
+```text
+submission_result = unknown
+```
+
+Reobserve. Do not resend.
 
 ### 5. Wait for ChatGPT thinking / streaming
 
@@ -260,6 +362,8 @@ While generation is active, continue waiting. Do not click Send.
 
 `orca wait --text "..." --worktree active --json` may be used only when there is a concrete expected text condition. For open-ended ChatGPT answers, repeated snapshots are safer than guessing the final text.
 
+If a READ command such as `snapshot` or `wait` disconnects, recover the runtime and safely retry the READ operation against the same tab. Do not change submission state merely because the transport dropped.
+
 ### 6. Determine completion by stability
 
 When generation controls disappear, read the latest assistant output from the snapshot. Wait about 2–3 seconds and snapshot again.
@@ -279,7 +383,15 @@ After submission, retain enough tab/thread identity to find the same conversatio
 orca tab list --worktree active --json
 ```
 
-If a wait/browser command times out after submission, re-select/reinspect that same ChatGPT tab and conversation. **Do not create a replacement consultation automatically.**
+If a wait/browser command times out or the Orca runtime disconnects after submission:
+
+1. recover runtime;
+2. list tabs;
+3. return to the same ChatGPT tab/thread;
+4. take a fresh snapshot;
+5. continue observing that same consultation.
+
+**Do not create a replacement consultation automatically.**
 
 ### 8. Return to local execution
 
@@ -306,8 +418,9 @@ Rules:
 - `submitted` means the prompt may already have been accepted.
 - `generating` means keep polling the same turn.
 - A timeout after submission is **not** proof of failure.
-- After timeout, resume by inspecting the same thread.
-- Never duplicate a prompt because a wait timed out.
+- An Orca runtime disconnect after a mutation is **not** proof that the mutation failed.
+- After timeout/disconnect, resume by inspecting the same thread.
+- Never duplicate a prompt because a wait timed out or a runtime transport dropped.
 - Prefer small periodic status observations over repeatedly copying the growing full response.
 - Read the full final answer once generation stops.
 - Require a short stable interval before declaring completion.
