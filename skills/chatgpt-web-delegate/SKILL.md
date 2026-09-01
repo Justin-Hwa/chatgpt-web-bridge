@@ -1,6 +1,6 @@
 ---
 name: chatgpt-web-delegate
-description: Use when a local Codex/OMP agent should delegate thinking, planning, architecture review, root-cause second opinions, or independent code review to visible ChatGPT Web while keeping repository investigation, edits, commands, tests, Git and deployment local. Supports Codex Desktop browser bridges, ORCA host browser tools, and shell browser fallbacks. Includes bounded autonomous delegation and submit-once waiting for long ChatGPT responses.
+description: Use when a local Codex/OMP agent should delegate thinking, planning, architecture review, root-cause second opinions, or independent code review to visible ChatGPT Web while keeping repository investigation, edits, commands, tests, Git and deployment local. In ORCA, a positive delegation decision MUST trigger the built-in browser through the Orca CLI instead of stopping at a recommendation to consult ChatGPT. Supports Codex Desktop browser bridges, ORCA built-in browser commands, and shell browser fallbacks. Includes bounded autonomous delegation and submit-once waiting for long ChatGPT responses.
 ---
 
 # ChatGPT Web Delegate
@@ -64,6 +64,28 @@ Default budget per user task:
 
 A follow-up is justified only by new evidence or a still-material unresolved question. Never create model-to-model chatter for its own sake.
 
+## Mandatory action after a positive delegation decision
+
+A positive delegation decision is an **action trigger**, not merely advice to the user.
+
+When this Skill decides `delegate = true`:
+
+1. prepare the consultation prompt;
+2. select the best available browser provider;
+3. actually open/reuse ChatGPT Web;
+4. submit the consultation exactly once;
+5. wait for a stable answer;
+6. return the answer to the local execution loop;
+7. verify the advice against local facts before changing code.
+
+In ORCA, **do not stop after saying** things such as:
+
+- "This should be reviewed by ChatGPT."
+- "I recommend consulting ChatGPT."
+- "ORCA Browser could be used here."
+
+If ORCA is available and the user has not prohibited browser/external consultation, proceed to the ORCA browser commands below.
+
 ## Prepare the consultation
 
 Before using ChatGPT, investigate locally first. Send the minimum useful context.
@@ -112,43 +134,162 @@ If `globalThis.agent?.browsers` exists, or a compatible `BrowserLike` is injecte
 
 Submit with `wait:false` and `read:false`, then poll the existing turn. Never hide a second submission inside retry logic.
 
-### B. ORCA + Codex CLI / OMP host browser tool
+### B. ORCA + Codex CLI / OMP: use Orca built-in browser through the `orca` CLI
 
-If running inside ORCA and ORCA exposes its browser as Agent tools rather than a JS browser object, use the ORCA browser tools directly.
+For ORCA, the preferred executable path is the Orca CLI because Orca exposes typed commands for its embedded browser.
 
-Do not add BrowserSkill merely to reach ChatGPT when the ORCA browser already works.
+Before claiming that the ORCA browser is unavailable, execute:
 
-Follow the **ORCA visible-session protocol** below.
+```bash
+command -v orca
+orca status --json
+```
+
+On Windows shells where `command -v` is unavailable, use the shell's normal executable lookup such as `where.exe orca` or `Get-Command orca`.
+
+If `orca status --json` succeeds, treat the ORCA built-in browser as available and proceed. Do not install BrowserSkill just to reach ChatGPT.
+
+If the version-matched Orca skill is available, it is useful but not required because the commands are defined here:
+
+```bash
+orca skills get orca-cli
+```
+
+A one-time installation may be performed when appropriate:
+
+```bash
+orca skills install --skill orca-cli
+```
+
+Do not make installation of `orca-cli` a prerequisite for using the typed `orca` browser commands if those commands already work.
 
 ### C. Shell fallback such as Tencent BrowserSkill
 
-If ordinary Codex CLI has `bsk` available, use BrowserSkill in an isolated Agent Window. Reuse the signed-in browser state, obey its session lifecycle, and stop the session when finished.
+Only when the ORCA built-in browser is not usable and ordinary shell browser automation is needed, use BrowserSkill if `bsk` is available.
 
 If no supported browser is available, report `browser_provider_unavailable`. Continue local work when possible; ChatGPT consultation is advisory, not a reason to halt all development.
 
-## ORCA visible-session protocol
+## ORCA executable browser protocol
 
-When using the ORCA built-in browser:
+This protocol is mandatory when running under ORCA and `orca status --json` succeeds.
 
-1. Open or reuse a visible `https://chatgpt.com/` tab.
-2. Confirm that ChatGPT is signed in. Do not bypass login, captcha, account controls, or permissions.
-3. Prefer a new conversation for a new independent review. Reuse an existing thread only when continuity is useful or explicitly requested.
-4. Enter the complete consultation prompt.
-5. **Submit exactly once.**
-6. Record that the consultation is now `submitted`.
-7. Observe the page for generation state:
-   - stop-generation control visible
-   - streaming/typing indicator
-   - assistant content still changing
-   - any other host-visible generating signal
-8. While any generating signal remains, wait and re-observe. Do not click Send again.
-9. Once generation appears inactive, read the latest assistant answer.
-10. Re-observe after a short stability interval. If the answer is still changing, continue waiting.
-11. Only after the assistant turn is stable, return the result to the local Agent.
-12. Keep the ChatGPT thread reference/URL when another follow-up may be needed.
-13. Resume local investigation, implementation or tests and verify the advice.
+### 1. Open the embedded browser
 
-If a browser operation times out after submission, treat the consultation as **possibly still running**. Reopen/reuse the same thread and inspect status. Never create a replacement prompt automatically.
+First inspect existing tabs:
+
+```bash
+orca tab list --worktree active --json
+```
+
+If a suitable ChatGPT tab is already present, switch to it. Otherwise create one:
+
+```bash
+orca tab create --url https://chatgpt.com/ --worktree active --json
+```
+
+If tab creation is not appropriate for the current state, navigate the active embedded tab:
+
+```bash
+orca goto --url https://chatgpt.com/ --worktree active --json
+```
+
+The `orca tab create` / `orca goto` command is the step that **actually opens Orca's built-in browser**. Do not replace it with a prose recommendation.
+
+### 2. Inspect before acting
+
+Always snapshot before interacting:
+
+```bash
+orca snapshot --worktree active --json
+```
+
+Use element refs such as `@e1`, `@e2`, ... from the **latest** snapshot. Re-snapshot after navigation, tab changes, significant clicks, or stale-ref errors.
+
+If the snapshot shows login, captcha, OTP, workspace/account selection, or another human-only blocker, stop and ask the user to complete it. Do not bypass it.
+
+### 3. Fill the ChatGPT composer
+
+Identify the visible ChatGPT prompt/composer element from the latest snapshot and fill its ref:
+
+```bash
+orca fill --element @eN --value "<consultation prompt>" --worktree active --json
+```
+
+Use correct shell quoting for multiline prompts. Do not expose secrets through shell history when the prompt contains sensitive material; sensitive material should normally not be delegated at all.
+
+Re-snapshot after filling if necessary:
+
+```bash
+orca snapshot --worktree active --json
+```
+
+### 4. Submit exactly once
+
+Identify the visible Send control from the latest snapshot and click it:
+
+```bash
+orca click --element @eM --worktree active --json
+```
+
+After this succeeds, record:
+
+```text
+submitted = true
+```
+
+From this point onward, **never automatically fill/click Send again for the same consultation**.
+
+### 5. Wait for ChatGPT thinking / streaming
+
+After submission, use a snapshot -> wait -> snapshot loop against the same tab/thread:
+
+```bash
+orca snapshot --worktree active --json
+# wait briefly using the local shell/runtime
+orca snapshot --worktree active --json
+```
+
+Treat any of the following as generating signals:
+
+- a Stop / Stop generating control
+- a thinking/streaming indicator
+- assistant answer content changing between snapshots
+- any other clear visible generation state
+
+While generation is active, continue waiting. Do not click Send.
+
+`orca wait --text "..." --worktree active --json` may be used only when there is a concrete expected text condition. For open-ended ChatGPT answers, repeated snapshots are safer than guessing the final text.
+
+### 6. Determine completion by stability
+
+When generation controls disappear, read the latest assistant output from the snapshot. Wait about 2–3 seconds and snapshot again.
+
+Only declare `complete` when:
+
+- no generating signal is visible; and
+- the latest assistant answer is unchanged across the stability interval.
+
+Otherwise remain in `generating` / `stable_candidate` and keep waiting.
+
+### 7. Preserve the same thread for recovery/follow-up
+
+After submission, retain enough tab/thread identity to find the same conversation again. Use:
+
+```bash
+orca tab list --worktree active --json
+```
+
+If a wait/browser command times out after submission, re-select/reinspect that same ChatGPT tab and conversation. **Do not create a replacement consultation automatically.**
+
+### 8. Return to local execution
+
+Once the answer is stable:
+
+1. summarize/capture the ChatGPT advice;
+2. mark it as advisory/unverified;
+3. return to the repository;
+4. run discriminating tests or inspect local evidence;
+5. implement only the parts justified by local facts.
 
 ## Waiting rules for long ChatGPT thinking/output
 
