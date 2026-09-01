@@ -1,12 +1,12 @@
 {
   "name": "chatgpt-web-bridge",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "type": "module",
   "description": "Universal Agent Skill/runtime for using visible ChatGPT Web as thinker/planner/reviewer while local Codex/OMP remains executor.",
   "license": "MIT",
   "scripts": {
-    "check": "node --check src/delegation-policy.mjs && node --check src/prompt-builder.mjs && node --check src/provider-detect.mjs && node --check src/wait-state.mjs && node --check src/sdk-consult.mjs",
+    "check": "node --check src/delegation-policy.mjs && node --check src/prompt-builder.mjs && node --check src/provider-detect.mjs && node --check src/wait-state.mjs && node --check src/orca-runtime-recovery.mjs && node --check src/sdk-consult.mjs",
     "test": "node --test"
   },
   "dependencies": {
