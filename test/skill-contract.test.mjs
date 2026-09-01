@@ -31,3 +31,22 @@ test("positive delegation is an action trigger, not a recommendation only", asyn
   assert.match(skill, /actually open\/reuse ChatGPT Web/i);
   assert.match(skill, /do not stop after saying/i);
 });
+
+test("ORCA runtime recovery contract forbids blind mutation retries", async () => {
+  const skill = await readFile(skillUrl, "utf8");
+
+  for (const required of [
+    "unknown != failed",
+    "HIGH-RISK MUTATION",
+    "discard all old element refs",
+    "do not fill again",
+    "A transport error does **not** prove Send failed",
+    "submission_result = unknown",
+    "Do not resend"
+  ]) {
+    assert.ok(
+      skill.includes(required),
+      `SKILL.md must retain runtime recovery rule: ${required}`
+    );
+  }
+});
