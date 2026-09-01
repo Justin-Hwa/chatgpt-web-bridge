@@ -1,0 +1,11 @@
+{
+  "taskKind": "authentication",
+  "stalledIterations": 2,
+  "competingHypotheses": 3,
+  "confidence": 0.55,
+  "changeSize": "medium",
+  "planReady": false,
+  "implementationComplete": false,
+  "localTestsPassed": false,
+  "consultationCount": 0
+}
