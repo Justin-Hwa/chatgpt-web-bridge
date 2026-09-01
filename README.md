@@ -1,5 +1,7 @@
 # chatgpt-web-bridge
 
+**English** | [简体中文](README.zh-CN.md)
+
 A universal Agent Skill/runtime for delegating **thinking, planning, architecture review, root-cause second opinions, and independent review** to visible ChatGPT Web while keeping **local Codex / OMP as the executor and repository fact owner**.
 
 The target environments are:
