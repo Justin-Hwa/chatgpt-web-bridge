@@ -1,13 +1,18 @@
 {
   "name": "chatgpt-web-bridge",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "Universal Agent Skill/runtime for using visible ChatGPT Web as thinker/planner/reviewer while local Codex/OMP remains executor.",
+  "description": "ChatGPT web delegation plus a native Microsoft 365 Copilot local repository API bridge.",
   "license": "MIT",
   "scripts": {
-    "check": "node --check src/delegation-policy.mjs && node --check src/prompt-builder.mjs && node --check src/provider-detect.mjs && node --check src/wait-state.mjs && node --check src/orca-runtime-recovery.mjs && node --check src/sdk-consult.mjs",
-    "test": "node --test"
+    "check": "node --check src/delegation-policy.mjs && node --check src/prompt-builder.mjs && node --check src/provider-detect.mjs && node --check src/wait-state.mjs && node --check src/orca-runtime-recovery.mjs && node --check src/sdk-consult.mjs && node --check copilot/cli.mjs && node --check copilot/config.mjs && node --check copilot/tools.mjs && node --check copilot/server.mjs && node --check copilot/openapi.mjs && node --check copilot/package.mjs",
+    "test": "node --test",
+    "copilot:init": "node copilot/cli.mjs init",
+    "copilot:start": "node copilot/cli.mjs serve",
+    "copilot:doctor": "node copilot/cli.mjs doctor",
+    "copilot:package": "node copilot/cli.mjs package",
+    "test:copilot": "node --test copilot/*.test.mjs"
   },
   "dependencies": {
     "codex-chatgpt-control": "next"

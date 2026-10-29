@@ -1,5 +1,20 @@
 # chatgpt-web-bridge
 
+## Microsoft 365 Copilot local repository edition (v0.2)
+
+This repository also includes a native Microsoft 365 Copilot **declarative agent + authenticated OpenAPI bridge**. In the Copilot web agent, you can read and edit configured local Git repositories and run structured Git operations. It uses your Microsoft 365 Copilot experience; no model API key or local Codex is required for this mode.
+
+The original ChatGPT delegation workflow below is unchanged. Copilot integration adds a local executor service instead of replacing ChatGPT URLs or automating browser DOM.
+
+- Node.js 20+ and Git; the Copilot runtime uses only Node built-ins (no `npm install` required).
+- Your tenant must allow custom agents/apps; the local bridge needs a cloud-reachable HTTPS endpoint and a registered bearer API key.
+- Includes Windows setup instructions, guarded edits, branch controls, repeat-request protection, and an app ZIP generator.
+- Supported Git: status/diff/log/show, fetch, fast-forward pull, branch switch/create, explicit staging, commit, optional push. No arbitrary shell/build/test execution.
+- Automated local tests cover the service, repository operations and package structure. Tenant upload and live Copilot tool selection still need validation with your account.
+
+**Start here: [中文安装与使用说明](docs/COPILOT.zh-CN.md).**
+
+
 **English** | [简体中文](README.zh-CN.md)
 
 A universal Agent Skill/runtime for delegating **thinking, planning, architecture review, root-cause second opinions, and independent review** to visible ChatGPT Web while keeping **local Codex / OMP as the executor and repository fact owner**.
