@@ -1,5 +1,20 @@
 # chatgpt-web-bridge
 
+## Microsoft 365 Copilot 本地仓库适配版（v0.2）
+
+现已增加 **Copilot 声明式 Agent + 带认证的本地 OpenAPI 服务**。在 M365 Copilot 网页中选择 `Local Repo Bridge` Agent，即可读取、修改已配置的本地代码仓库，执行受支持的 Git 操作。
+
+这个模式使用你的 M365 Copilot，不需要模型 API Key，也不依赖本地 Codex。原有 ChatGPT 委托模式仍保留。这里增加了本地执行服务，而不是简单替换网页地址。
+
+- 本地需要 Node.js 20+、Git；Copilot 服务只使用 Node 内置模块，无需 `npm install`。
+- 公司租户需允许自定义 Agent/App；通过 HTTPS 隧道连接本地服务，并注册 Bearer API Key。
+- 支持代码分页读取、带版本校验的写入、Git 查询/分支/暂存/提交/拉取及可选推送。
+- 不提供任意 Shell、构建或测试命令执行；这些仍在本地终端运行。
+- 已有本地自动测试；公司租户上传和真实 Copilot 工具调用需要用你的账号验收。
+
+**完整步骤：[Copilot 中文安装与使用说明](docs/COPILOT.zh-CN.md)。**
+
+
 [English](README.md) | **简体中文**
 
 一个通用的 Agent Skill / Runtime，用于把**思考、计划、架构审查、Root Cause 第二意见和独立 Review**委派给可见的 ChatGPT Web，同时始终保持**本地 Codex / OMP 作为执行者（Executor）和本地项目事实源**。
