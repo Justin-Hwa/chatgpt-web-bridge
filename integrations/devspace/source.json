@@ -1,0 +1,38 @@
+{
+  "upstreamRepository": "https://github.com/Waishnav/devspace",
+  "baseCommit": "fdbff75e07779bba1f2fdc785a2575e2b0d839bc",
+  "sourceCommits": [
+    "c6ced15bd53c4588785f1ab5d4f9eff87f6ceec3",
+    "3822a981292d4257d0150dc28af7fb159686eb5d"
+  ],
+  "patch": "devspace-copilot.patch",
+  "changedFiles": [
+    "docs/configuration.md",
+    "package.json",
+    "scripts/Start-DevSpace-Copilot.cmd",
+    "src/config.test.ts",
+    "src/config.ts",
+    "src/git-tools.test.ts",
+    "src/git-tools.ts",
+    "src/logger.ts",
+    "src/oauth-provider.ts",
+    "src/oauth-resource.test.ts",
+    "src/oauth-store.test.ts",
+    "src/oauth-store.ts",
+    "src/server.test.ts",
+    "src/server.ts",
+    "src/ui/card-types.ts",
+    "src/ui/tool-display.ts",
+    "src/user-config.ts"
+  ],
+  "validation": {
+    "date": "2026-11-05",
+    "typecheck": "passed",
+    "configTests": "passed",
+    "oauthStoreTests": "passed",
+    "oauthHttpTests": 2,
+    "gitAndServerTests": 15,
+    "patchApplication": "passed",
+    "matchingResultBlobHashes": 17
+  }
+}
