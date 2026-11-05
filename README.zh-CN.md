@@ -1,5 +1,9 @@
 # chatgpt-web-bridge
 
+## DevSpace MCP 适配
+
+本分支统一保存 Copilot 适配内容：下方是原有 OpenAPI 桥接方案；后续 DevSpace MCP 的 OAuth、Git 工具及启动配置修改，以完整源码补丁形式保存在 [integrations/devspace](integrations/devspace/README.zh-CN.md)。补丁需应用到指定版本的 DevSpace 仓库，已运行本轮修改的电脑无需重复应用。
+
 ## Microsoft 365 Copilot 本地仓库适配版（v0.2）
 
 现已增加 **Copilot 声明式 Agent + 带认证的本地 OpenAPI 服务**。在 M365 Copilot 网页中选择 `Local Repo Bridge` Agent，即可读取、修改已配置的本地代码仓库，执行受支持的 Git 操作。

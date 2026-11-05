@@ -1,5 +1,9 @@
 # chatgpt-web-bridge
 
+## DevSpace MCP integration
+
+For the DevSpace MCP route, see [the integration guide and complete source patch](integrations/devspace/README.zh-CN.md). This delivery branch contains both the original OpenAPI bridge and the later DevSpace OAuth/Git adaptations. Apply the patch to the pinned DevSpace checkout; it is not a replacement for this repository's runtime.
+
 ## Microsoft 365 Copilot local repository edition (v0.2)
 
 This repository also includes a native Microsoft 365 Copilot **declarative agent + authenticated OpenAPI bridge**. In the Copilot web agent, you can read and edit configured local Git repositories and run structured Git operations. It uses your Microsoft 365 Copilot experience; no model API key or local Codex is required for this mode.

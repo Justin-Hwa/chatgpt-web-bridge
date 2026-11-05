@@ -1,5 +1,7 @@
 # Microsoft 365 Copilot 本地代码仓库版
 
+> 本文介绍原有 OpenAPI 桥接服务。若使用已经接通的 DevSpace MCP，请阅读 [DevSpace MCP 安装与补丁说明](../integrations/devspace/README.zh-CN.md)。两种方案的认证、启动命令和运行项目不同。
+
 本版本让 Microsoft 365 Copilot 网页中的专用 **Local Repo Bridge Agent** 读取你指定的本地代码仓库、修改 UTF-8 文本文件，并执行受支持的 Git 操作。它使用你登录的 Microsoft 365 Copilot 来理解任务，不需要 OpenAI API Key，也不需要额外运行 Codex。
 
 原项目是“本地 Codex/OMP 向 ChatGPT 网页咨询”的委派工具，不能只把 ChatGPT 网址改成 Copilot 就获得本地读写能力。本版本保留原工具，在 `copilot/` 中新增本地执行服务和微软原生 Agent 打包器。

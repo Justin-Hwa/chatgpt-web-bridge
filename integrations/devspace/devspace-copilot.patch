@@ -1,0 +1,1508 @@
+diff --git a/docs/configuration.md b/docs/configuration.md
+index 93a3d4fa35fd3fae37e6c46e9b3032898fd5ece9..2090f06fcc5f2723916faaefa2a16ad719f051fe 100644
+--- a/docs/configuration.md
++++ b/docs/configuration.md
+@@ -81,6 +81,23 @@ DevSpace uses a single-user OAuth approval flow.
+ | `DEVSPACE_OAUTH_REFRESH_TOKEN_TTL_SECONDS` | `2592000` |
+ | `DEVSPACE_OAUTH_SCOPES` | `devspace` |
+ | `DEVSPACE_OAUTH_ALLOWED_REDIRECT_HOSTS` | `chatgpt.com,localhost,127.0.0.1` |
++| `DEVSPACE_OAUTH_DEFAULT_RESOURCE_WHEN_MISSING` | `0` |
++
++Some OAuth hosts, including the observed Microsoft 365 Copilot login flow, omit
++`resource` from authorization requests. Set
++`DEVSPACE_OAUTH_DEFAULT_RESOURCE_WHEN_MISSING=1` only when this compatibility is
++needed. An omitted resource is then bound to this server's canonical `/mcp` URL
++in the approval form, authorization code, access token, and refresh token.
++Explicit invalid resources are still rejected. Owner approval, PKCE, client
++authentication, redirect validation, and MCP token resource checks remain active.
++The setting applies to all registered clients of this single-resource server;
++it does not identify or trust a client as Microsoft.
++
++For Microsoft 365 Copilot, also include `teams.microsoft.com` in the redirect
++host allowlist, preserving the other hosts you use. These OAuth environment
++settings must be applied to the process that starts DevSpace. Restart the server
++after rebuilding changed source; provisioning the Copilot app alone does not
++update the local server.
+ 
+ MCP clients discover metadata from:
+ 
+@@ -89,6 +106,34 @@ MCP clients discover metadata from:
+ /.well-known/oauth-authorization-server
+ ```
+ 
++## Microsoft 365 Copilot on Windows
++
++After building this checkout, stop the previous DevSpace process and run from
++the repository root:
++
++```powershell
++.\scripts\Start-DevSpace-Copilot.cmd
++```
++
++This launcher enables full tool mode and the missing-resource OAuth compatibility
++option for its child process, and adds `teams.microsoft.com` (declarative agent)
++and `global.consent.azure-apim.net` (observed Copilot Studio callback) to the
++existing redirect host list (or the default list). It retains existing credentials, roots,
++and public URL configuration. Keep the HTTPS tunnel running separately.
++
++Full mode exposes read-only `ls`, `grep`, and `glob` tools. Prefer those and
++`read` for file inspection, and `git_status` for branch/upstream/ahead-behind
++queries. `git_status` accepts an optional `compareRef` (default `origin/main`)
++and reports both upstream and comparison counts. It uses local cached refs,
++never fetches, and reports missing refs or unborn HEAD without inventing counts.
++Each repository must be opened as its own workspace.
++
++Copilot uses MCP tool annotations to determine confirmation behavior. These
++read-only tools can avoid repeated confirmations after initial consent, subject
++to host behavior. Shell commands, writes, edits, fetches and pushes remain
++write-capable tools. This launcher does not auto-approve them. Start a new
++Copilot conversation after restart so it can discover the updated tool surface.
++
+ ## Tool Modes
+ 
+ `DEVSPACE_TOOL_MODE` controls the tool surface.
+@@ -227,6 +272,34 @@ npx @waishnav/devspace serve
+ 
+ ## Logging
+ 
++## Controlled Git tools
++
++DevSpace always exposes `git_status`, `git_fetch`, `git_pull`, `git_switch`,
++`git_stage`, `git_commit`, and `git_push`. These tools run Git through fixed
++argument arrays rather than the shell and operate only when the opened workspace
++root is exactly the repository root after canonical-path resolution.
++
++`git_pull` always uses `--ff-only`. Pull and branch-switch operations refuse a
++dirty working tree and return the modified paths; they never stash, reset, or
++discard changes. `git_stage` requires explicit workspace-relative paths.
++Destructive reset and clean operations are intentionally not exposed.
++
++Direct commits and pushes to `main` are denied by default. Configure additional
++protected branches in `~/.devspace/config.json`:
++
++```json
++{
++  "git": {
++    "protectedBranches": ["main", "release"]
++  }
++}
++```
++
++For exceptional administrator-controlled workflows only, set
++`DEVSPACE_GIT_ALLOW_COMMIT_TO_PROTECTED_BRANCHES=1` and/or
++`DEVSPACE_GIT_ALLOW_PUSH_TO_PROTECTED_BRANCHES=1` in the service environment.
++Those switches should not be used for normal agent development.
++
+ | Variable | Default |
+ | --- | --- |
+ | `DEVSPACE_LOG_LEVEL` | `info` |
+@@ -239,6 +312,13 @@ npx @waishnav/devspace serve
+ 
+ Set `DEVSPACE_LOG_FORMAT=pretty` for local debugging.
+ 
++For a tunnel or reverse proxy connecting from a local loopback address, set
++`DEVSPACE_TRUST_PROXY=loopback`. Express then trusts only loopback proxy addresses
++when resolving forwarded client IPs, and request logs use that resolved IP.
++The Copilot Windows startup script uses this mode. The default remains `0`;
++legacy `1` trusts every proxy and can trigger express-rate-limit validation.
++Proxy trust does not change the OAuth redirect host allowlist.
++
+ Set `DEVSPACE_LOG_SHELL_COMMANDS=1` only when you intentionally want command
+ previews in logs.
+ 
+diff --git a/package.json b/package.json
+index 388f99e25aba640cb1cb83b3b212c5b8247f094c..74a3ffb54915b6d096a80da31096af03e78219d9 100644
+--- a/package.json
++++ b/package.json
+@@ -29,7 +29,7 @@
+     "dev": "node scripts/dev-server.mjs",
+     "postinstall": "node scripts/fix-node-pty-permissions.mjs",
+     "start": "node dist/cli.js serve",
+-    "test": "tsx src/config.test.ts && tsx src/onboarding.test.ts && tsx src/cli-workspace.test.ts && tsx src/request-meta.test.ts && tsx src/incoming-artifacts.test.ts && tsx src/artifact-download.test.ts && tsx src/ui/card-types.test.ts && tsx src/ui/patch-display.test.ts && tsx src/ui/tool-display.test.ts && tsx src/apply-patch.test.ts && tsx src/process-platform.test.ts && tsx src/process-sessions.test.ts && tsx src/mcp-sessions.test.ts && tsx src/server-shutdown.test.ts && tsx src/local-agent-config.test.ts && tsx src/local-agent-catalog.test.ts && tsx src/local-agent-presentation.test.ts && tsx src/local-agent-runtime.test.ts && tsx src/local-agent-daemon-lifecycle.test.ts && tsx src/local-agent-daemon-protocol.test.ts && tsx src/local-agent-daemon.test.ts && tsx src/local-agent-codex.test.ts && tsx src/local-agent-opencode.test.ts && tsx src/local-agent-acp.test.ts && tsx src/local-agent-grok.test.ts && tsx src/local-agent-pi-sandbox.test.ts && tsx src/local-agent-pi.test.ts && tsx src/local-agent-claude.test.ts && tsx src/local-agent-adapters.test.ts && tsx src/local-agent-availability.test.ts && tsx src/local-agent-profiles.test.ts && tsx src/local-agent-targets.test.ts && tsx src/local-agent-store.test.ts && tsx src/local-agent-manager.test.ts && tsx src/roots.test.ts && tsx src/skills.test.ts && tsx src/workspaces.test.ts && tsx src/workspace-conversation.test.ts && tsx src/review-checkpoints.test.ts && tsx src/server.test.ts && tsx src/oauth-store.test.ts && tsx src/cli.test.ts",
++    "test": "tsx src/config.test.ts && tsx src/onboarding.test.ts && tsx src/cli-workspace.test.ts && tsx src/request-meta.test.ts && tsx src/incoming-artifacts.test.ts && tsx src/artifact-download.test.ts && tsx src/ui/card-types.test.ts && tsx src/ui/patch-display.test.ts && tsx src/ui/tool-display.test.ts && tsx src/apply-patch.test.ts && tsx src/process-platform.test.ts && tsx src/process-sessions.test.ts && tsx src/mcp-sessions.test.ts && tsx src/server-shutdown.test.ts && tsx --test src/git-tools.test.ts && tsx src/local-agent-config.test.ts && tsx src/local-agent-catalog.test.ts && tsx src/local-agent-presentation.test.ts && tsx src/local-agent-runtime.test.ts && tsx src/local-agent-daemon-lifecycle.test.ts && tsx src/local-agent-daemon-protocol.test.ts && tsx src/local-agent-daemon.test.ts && tsx src/local-agent-codex.test.ts && tsx src/local-agent-opencode.test.ts && tsx src/local-agent-acp.test.ts && tsx src/local-agent-grok.test.ts && tsx src/local-agent-pi-sandbox.test.ts && tsx src/local-agent-pi.test.ts && tsx src/local-agent-claude.test.ts && tsx src/local-agent-adapters.test.ts && tsx src/local-agent-availability.test.ts && tsx src/local-agent-profiles.test.ts && tsx src/local-agent-targets.test.ts && tsx src/local-agent-store.test.ts && tsx src/local-agent-manager.test.ts && tsx src/roots.test.ts && tsx src/skills.test.ts && tsx src/workspaces.test.ts && tsx src/workspace-conversation.test.ts && tsx src/review-checkpoints.test.ts && tsx src/server.test.ts && tsx src/oauth-store.test.ts && tsx src/oauth-resource.test.ts && tsx src/cli.test.ts",
+     "typecheck": "tsc -p tsconfig.json --noEmit"
+   },
+   "keywords": [],
+diff --git a/scripts/Start-DevSpace-Copilot.cmd b/scripts/Start-DevSpace-Copilot.cmd
+new file mode 100644
+index 0000000000000000000000000000000000000000..87a43bb8529d43b18e4e6337bb3c2538b9b9b858
+--- /dev/null
++++ b/scripts/Start-DevSpace-Copilot.cmd
+@@ -0,0 +1,18 @@
++@echo off
++setlocal
++cd /d "%~dp0.."
++if not exist "dist\cli.js" (
++  echo DevSpace has not been built. Run npm run build first.
++  exit /b 1
++)
++set "DEVSPACE_TOOL_MODE=full"
++rem The tunnel connects to DevSpace through a local loopback address.
++set "DEVSPACE_TRUST_PROXY=loopback"
++set "DEVSPACE_OAUTH_DEFAULT_RESOURCE_WHEN_MISSING=1"
++if defined DEVSPACE_OAUTH_ALLOWED_REDIRECT_HOSTS (
++  set "DEVSPACE_OAUTH_ALLOWED_REDIRECT_HOSTS=%DEVSPACE_OAUTH_ALLOWED_REDIRECT_HOSTS%,teams.microsoft.com,global.consent.azure-apim.net"
++) else (
++  set "DEVSPACE_OAUTH_ALLOWED_REDIRECT_HOSTS=chatgpt.com,localhost,127.0.0.1,teams.microsoft.com,global.consent.azure-apim.net"
++)
++node ".\dist\cli.js" serve
++exit /b %errorlevel%
+diff --git a/src/config.test.ts b/src/config.test.ts
+index 7b3eeeb6a592809f83f3200f2b3c640b9ce18a87..37fae693d3350c3ecc2c719d864be23a204c59d5 100644
+--- a/src/config.test.ts
++++ b/src/config.test.ts
+@@ -79,6 +79,8 @@ assert.equal(loadConfig({ ...baseEnv, DEVSPACE_LOG_ASSETS: "1" }).logging.assets
+ assert.equal(loadConfig({ ...baseEnv, DEVSPACE_LOG_TOOL_CALLS: "0" }).logging.toolCalls, false);
+ assert.equal(loadConfig({ ...baseEnv, DEVSPACE_LOG_SHELL_COMMANDS: "1" }).logging.shellCommands, true);
+ assert.equal(loadConfig({ ...baseEnv, DEVSPACE_TRUST_PROXY: "1" }).logging.trustProxy, true);
++assert.equal(loadConfig({ ...baseEnv, DEVSPACE_TRUST_PROXY: "loopback" }).logging.trustProxy, "loopback");
++assert.equal(loadConfig({ ...baseEnv, DEVSPACE_TRUST_PROXY: "0" }).logging.trustProxy, false);
+ 
+ assert.throws(
+   () => loadConfig({ ...baseEnv, DEVSPACE_LOG_LEVEL: "trace" }),
+@@ -92,6 +94,9 @@ assert.throws(
+ 
+ assert.equal(loadConfig(baseEnv).oauth.ownerToken, "test-owner-token-that-is-long-enough");
+ assert.deepEqual(loadConfig(baseEnv).oauth.scopes, ["devspace"]);
++assert.equal(loadConfig(baseEnv).oauth.defaultResourceWhenMissing, false);
++assert.equal(loadConfig({ ...baseEnv, DEVSPACE_OAUTH_DEFAULT_RESOURCE_WHEN_MISSING: "1" }).oauth.defaultResourceWhenMissing, true);
++assert.equal(loadConfig({ ...baseEnv, DEVSPACE_OAUTH_DEFAULT_RESOURCE_WHEN_MISSING: "0" }).oauth.defaultResourceWhenMissing, false);
+ assert.deepEqual(loadConfig(baseEnv).oauth.allowedRedirectHosts, [
+   "chatgpt.com",
+   "localhost",
+diff --git a/src/config.ts b/src/config.ts
+index 54a131c9a75ab70cdc6dc02f5e93fa4b80521f1e..7ccd33f1bdc8c2f15b47ef1a1b3329d127712e33 100644
+--- a/src/config.ts
++++ b/src/config.ts
+@@ -6,6 +6,12 @@ import type { OAuthConfig } from "./oauth-provider.js";
+ import { devspaceAgentsDir, devspaceSkillsDir, loadDevspaceFiles } from "./user-config.js";
+ import { resolveSubagentsConfig, type SubagentsConfig } from "./local-agent-config.js";
+ 
++export interface GitPolicyConfig {
++  protectedBranches: string[];
++  allowCommitToProtectedBranches: boolean;
++  allowPushToProtectedBranches: boolean;
++}
++
+ export type ToolMode = "minimal" | "full" | "codex";
+ export type WidgetMode = "off" | "changes" | "full";
+ const DEFAULT_OAUTH_ACCESS_TOKEN_TTL_SECONDS = 60 * 60;
+@@ -31,6 +37,7 @@ export interface ServerConfig {
+   devspaceAgentsDir: string;
+   subagents: SubagentsConfig;
+   agentDir: string;
++  git: GitPolicyConfig;
+   logging: LoggingConfig;
+ }
+ 
+@@ -152,7 +159,9 @@ function parseLoggingConfig(env: NodeJS.ProcessEnv): LoggingConfig {
+     assets: parseBoolean(env.DEVSPACE_LOG_ASSETS),
+     toolCalls: env.DEVSPACE_LOG_TOOL_CALLS === undefined ? true : parseBoolean(env.DEVSPACE_LOG_TOOL_CALLS),
+     shellCommands: parseBoolean(env.DEVSPACE_LOG_SHELL_COMMANDS),
+-    trustProxy: parseBoolean(env.DEVSPACE_TRUST_PROXY),
++    trustProxy: env.DEVSPACE_TRUST_PROXY?.trim().toLowerCase() === "loopback"
++      ? "loopback"
++      : parseBoolean(env.DEVSPACE_TRUST_PROXY),
+   };
+ }
+ 
+@@ -188,6 +197,7 @@ function parseOAuthConfig(env: NodeJS.ProcessEnv, ownerToken: string | undefined
+       "DEVSPACE_OAUTH_REFRESH_TOKEN_TTL_SECONDS",
+     ),
+     scopes: parseStringList(env.DEVSPACE_OAUTH_SCOPES, ["devspace"]),
++    defaultResourceWhenMissing: parseBoolean(env.DEVSPACE_OAUTH_DEFAULT_RESOURCE_WHEN_MISSING),
+     allowedRedirectHosts: parseStringList(env.DEVSPACE_OAUTH_ALLOWED_REDIRECT_HOSTS, [
+       "chatgpt.com",
+       "localhost",
+@@ -250,6 +260,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
+     devspaceAgentsDir: devspaceAgentsDir(env),
+     subagents: resolveSubagentsConfig(files.config.subagents, env),
+     agentDir: resolve(expandHomePath(env.DEVSPACE_AGENT_DIR ?? files.config.agentDir ?? defaultAgentDir())),
++    git: {
++      protectedBranches: parseStringList(env.DEVSPACE_GIT_PROTECTED_BRANCHES, files.config.git?.protectedBranches ?? ["main"]),
++      allowCommitToProtectedBranches: parseBoolean(env.DEVSPACE_GIT_ALLOW_COMMIT_TO_PROTECTED_BRANCHES),
++      allowPushToProtectedBranches: parseBoolean(env.DEVSPACE_GIT_ALLOW_PUSH_TO_PROTECTED_BRANCHES),
++    },
+     logging: parseLoggingConfig(env),
+   };
+ }
+diff --git a/src/git-tools.test.ts b/src/git-tools.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..5edf404cde51b7c0bf1d30dd42504f8b5c257e40
+--- /dev/null
++++ b/src/git-tools.test.ts
+@@ -0,0 +1,131 @@
++import assert from "node:assert/strict";
++import { execFile } from "node:child_process";
++import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
++import { tmpdir } from "node:os";
++import { join } from "node:path";
++import test, { type TestContext } from "node:test";
++import { promisify } from "node:util";
++import { GitToolError, gitCommit, gitFetch, gitInspect, gitPull, gitPush, gitStage, gitStatus, gitSwitch, type GitPolicy } from "./git-tools.js";
++
++const execFileAsync = promisify(execFile);
++const protectedPolicy: GitPolicy = { protectedBranches: ["main"], allowCommitToProtectedBranches: false, allowPushToProtectedBranches: false };
++
++test("controlled Git tools fetch, ff-pull, protect dirty/diverged checkouts, and push a feature branch", async (t) => {
++  const fixture = await createFixture(t);
++  const remoteHead = await remoteCommit(fixture, "remote-one.txt", "one\n", "remote update");
++  await gitFetch(fixture.work, "origin");
++  assert.equal(await gitText(fixture.work, ["rev-parse", "origin/main"]), remoteHead);
++  const pulled = await gitPull(fixture.work, "origin", "main");
++  assert.equal(pulled.workingTreeClean, true);
++  assert.equal(await gitText(fixture.work, ["rev-parse", "HEAD"]), remoteHead);
++
++  await writeFile(join(fixture.work, "dirty.txt"), "do not discard\n");
++  await assertGitError(() => gitPull(fixture.work, "origin", "main"), "GIT_WORKTREE_DIRTY");
++  assert.equal(await readFile(join(fixture.work, "dirty.txt"), "utf8"), "do not discard\n");
++  await rm(join(fixture.work, "dirty.txt"));
++
++  await git(fixture.work, ["commit", "--allow-empty", "-m", "local divergence"]);
++  await remoteCommit(fixture, "remote-two.txt", "two\n", "remote divergence");
++  await assertGitError(() => gitPull(fixture.work, "origin", "main"), "GIT_PULL_FAILED");
++  assert.equal((await gitText(fixture.work, ["rev-list", "--parents", "-n", "1", "HEAD"])).split(" ").length, 2);
++
++  await git(fixture.work, ["reset", "--hard", "origin/main"]);
++  await gitSwitch(fixture.work, "feature/controlled-tools", { create: true });
++  await writeFile(join(fixture.work, "feature.txt"), "feature\n");
++  await gitStage(fixture.work, ["feature.txt"]);
++  await gitCommit(fixture.work, "Add controlled Git tool fixture", protectedPolicy);
++  await gitPush(fixture.work, "origin", "feature/controlled-tools", protectedPolicy);
++  assert.match(await gitText(fixture.work, ["ls-remote", "--heads", "origin", "feature/controlled-tools"]), /refs\/heads\/feature\/controlled-tools/);
++});
++
++test("controlled Git tools reject a nested workspace and direct commits to main", async (t) => {
++  const fixture = await createFixture(t);
++  const nested = join(fixture.work, "nested");
++  await mkdir(nested);
++  await assertGitError(() => gitStatus(nested), "GIT_WORKSPACE_ROOT_MISMATCH");
++  await writeFile(join(fixture.work, "main-change.txt"), "x\n");
++  await gitStage(fixture.work, ["main-change.txt"]);
++  await assertGitError(() => gitCommit(fixture.work, "Blocked main commit", protectedPolicy), "GIT_PROTECTED_BRANCH");
++});
++
++test("read-only inspection reports cached upstream divergence without touching files, refs or index", async (t) => {
++  const fixture = await createFixture(t);
++  await remoteCommit(fixture, "upstream.txt", "upstream\n", "upstream");
++  const stale = await gitInspect(fixture.work);
++  assert.equal(stale.comparison?.behind, 0, "inspection must not fetch unseen remote changes");
++  await gitFetch(fixture.work, "origin");
++  await git(fixture.work, ["commit", "--allow-empty", "-m", "local divergence"]);
++  await writeFile(join(fixture.work, "dirty.txt"), "keep this file\n");
++  const refsBefore = await gitText(fixture.work, ["show-ref"]);
++  const indexBefore = await readFile(join(fixture.work, ".git", "index"));
++  const status = await gitInspect(fixture.work);
++  assert.equal(status.branch, "main");
++  assert.equal(status.upstream, "refs/remotes/origin/main");
++  assert.equal(status.refsSource, "local");
++  assert.equal(status.workingTreeClean, false);
++  assert.deepEqual(status.modifiedFiles, ["dirty.txt"]);
++  for (const comparison of [status.comparison, status.upstreamComparison]) {
++    assert.equal(comparison?.status, "available");
++    assert.equal(comparison?.ahead, 1);
++    assert.equal(comparison?.behind, 1);
++  }
++  assert.equal(await gitText(fixture.work, ["show-ref"]), refsBefore);
++  assert.deepEqual(await readFile(join(fixture.work, ".git", "index")), indexBefore);
++  assert.equal(await readFile(join(fixture.work, "dirty.txt"), "utf8"), "keep this file\n");
++  const same = await gitInspect(fixture.work, "HEAD");
++  assert.equal(same.comparison?.ahead, 0);
++  assert.equal(same.comparison?.behind, 0);
++});
++
++test("read-only inspection handles missing refs, detached HEAD and unconfigured upstream", async (t) => {
++  const fixture = await createFixture(t);
++  const missing = await gitInspect(fixture.work, "origin/missing");
++  assert.equal(missing.comparison?.status, "ref_unavailable");
++  assert.equal(missing.comparison?.ahead, undefined);
++  await git(fixture.work, ["branch", "--unset-upstream"]);
++  assert.equal((await gitInspect(fixture.work)).upstream, undefined);
++  await git(fixture.work, ["switch", "--detach", "HEAD"]);
++  const detached = await gitInspect(fixture.work);
++  assert.equal(detached.branch, undefined);
++  assert.ok(detached.head);
++  assert.equal(detached.upstream, undefined);
++  assert.equal(detached.comparison?.status, "available");
++  for (const ref of ["--all", "HEAD...main", "HEAD;echo bad", "@{upstream}"]) {
++    await assertGitError(() => gitInspect(fixture.work, ref), "GIT_INVALID_REF");
++  }
++  const nested = join(fixture.work, "nested");
++  await mkdir(nested);
++  await assertGitError(() => gitInspect(nested), "GIT_WORKSPACE_ROOT_MISMATCH");
++});
++
++test("read-only inspection reports an unborn branch without inventing counts", async (t) => {
++  const root = await mkdtemp(join(tmpdir(), "devspace-git-unborn-"));
++  t.after(() => rm(root, { recursive: true, force: true }));
++  await git(root, ["init", "-b", "main"]);
++  const status = await gitInspect(root);
++  assert.equal(status.branch, "main");
++  assert.equal(status.head, undefined);
++  assert.equal(status.comparison?.status, "no_head");
++  assert.equal(status.comparison?.ahead, undefined);
++});
++
++async function createFixture(t: TestContext): Promise<{ root: string; work: string; author: string }> {
++  const root = await mkdtemp(join(tmpdir(), "devspace-git-tools-"));
++  const remote = join(root, "remote.git"); const seed = join(root, "seed"); const work = join(root, "work"); const author = join(root, "author");
++  t.after(() => rm(root, { recursive: true, force: true }));
++  await git(root, ["init", "--bare", remote]); await git(root, ["init", "-b", "main", seed]); await configure(seed);
++  await writeFile(join(seed, "README.md"), "seed\n"); await git(seed, ["add", "README.md"]); await git(seed, ["commit", "-m", "Initial commit"]);
++  await git(seed, ["remote", "add", "origin", remote]); await git(seed, ["push", "-u", "origin", "main"]);
++  await git(root, ["clone", remote, work]); await git(root, ["clone", remote, author]); await configure(work); await configure(author);
++  await git(work, ["switch", "main"]); await git(author, ["switch", "main"]);
++  return { root, work, author };
++}
++
++async function remoteCommit(fixture: { author: string }, path: string, content: string, message: string): Promise<string> {
++  await writeFile(join(fixture.author, path), content); await git(fixture.author, ["add", path]); await git(fixture.author, ["commit", "-m", message]); await git(fixture.author, ["push", "origin", "main"]);
++  return gitText(fixture.author, ["rev-parse", "HEAD"]);
++}
++async function configure(cwd: string): Promise<void> { await git(cwd, ["config", "user.email", "devspace-tests@example.com"]); await git(cwd, ["config", "user.name", "DevSpace Tests"]); }
++async function assertGitError(action: () => Promise<unknown>, code: string): Promise<void> { await assert.rejects(action, (error: unknown) => error instanceof GitToolError && error.code === code); }
++async function git(cwd: string, args: string[]): Promise<void> { await execFileAsync("git", args, { cwd }); }
++async function gitText(cwd: string, args: string[]): Promise<string> { return (await execFileAsync("git", args, { cwd })).stdout.trim(); }
+diff --git a/src/git-tools.ts b/src/git-tools.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..4cdfc0bd9281c77918cee82556d12fdca24c5510
+--- /dev/null
++++ b/src/git-tools.ts
+@@ -0,0 +1,306 @@
++import { realpath } from "node:fs/promises";
++import { relative } from "node:path";
++import { git } from "./git.js";
++import { isPathInsideRoot, resolveAllowedPath } from "./roots.js";
++
++export interface GitPolicy {
++  protectedBranches: string[];
++  allowCommitToProtectedBranches: boolean;
++  allowPushToProtectedBranches: boolean;
++}
++
++export interface GitRefComparison {
++  ref: string;
++  status: "available" | "no_head" | "ref_unavailable";
++  commit?: string;
++  ahead?: number;
++  behind?: number;
++}
++
++export interface GitWorkspaceStatus {
++  repoRoot: string;
++  head?: string;
++  upstream?: string;
++  upstreamComparison?: GitRefComparison;
++  comparison?: GitRefComparison;
++  refsSource?: "local";
++  branch?: string;
++  workingTreeClean: boolean;
++  modifiedFiles: string[];
++}
++
++export class GitToolError extends Error {
++  constructor(
++    readonly code: string,
++    message: string,
++    readonly status?: GitWorkspaceStatus,
++  ) {
++    super(message);
++    this.name = "GitToolError";
++  }
++}
++
++export async function gitStatus(workspaceRoot: string): Promise<GitWorkspaceStatus> {
++  const repoRoot = await assertWorkspaceRepository(workspaceRoot);
++  const [statusOutput, branch] = await Promise.all([
++    git(repoRoot, ["--no-optional-locks", "status", "--porcelain=v1", "-z"]),
++    currentBranch(repoRoot),
++  ]);
++  const modifiedFiles = porcelainPaths(statusOutput.stdout);
++  return {
++    repoRoot,
++    branch,
++    workingTreeClean: modifiedFiles.length === 0,
++    modifiedFiles,
++  };
++}
++
++/** Inspect cached refs only; never fetch or update a repository. */
++export async function gitInspect(workspaceRoot: string, compareRef = "origin/main"): Promise<GitWorkspaceStatus> {
++  if (!/^[A-Za-z0-9][A-Za-z0-9._/@-]*$/.test(compareRef) || compareRef.includes("..")) {
++    throw new GitToolError("GIT_INVALID_REF", "Comparison must be a branch, ref, or commit ID, not options or a revision expression.");
++  }
++  const status = await gitStatus(workspaceRoot);
++  const head = await resolveCommit(status.repoRoot, "HEAD");
++  const upstream = status.branch
++    ? (await git(status.repoRoot, ["for-each-ref", "--format=%(upstream)", "--", `refs/heads/${status.branch}`])).stdout.trim() || undefined
++    : undefined;
++  const [upstreamComparison, comparison] = await Promise.all([
++    upstream ? compareCachedRef(status.repoRoot, head, upstream) : undefined,
++    compareCachedRef(status.repoRoot, head, compareRef),
++  ]);
++  return { ...status, head, upstream, upstreamComparison, comparison, refsSource: "local" };
++}
++
++async function resolveCommit(repoRoot: string, ref: string): Promise<string | undefined> {
++  try {
++    return (await git(repoRoot, ["rev-parse", "--verify", "--quiet", "--end-of-options", `${ref}^{commit}`])).stdout.trim() || undefined;
++  } catch {
++    return undefined;
++  }
++}
++
++async function compareCachedRef(repoRoot: string, head: string | undefined, ref: string): Promise<GitRefComparison> {
++  if (!head) return { ref, status: "no_head" };
++  const commit = await resolveCommit(repoRoot, ref);
++  if (!commit) return { ref, status: "ref_unavailable" };
++  // Only resolved commit IDs reach rev-list; user input is never a shell command.
++  const counts = (await git(repoRoot, ["rev-list", "--left-right", "--count", `${head}...${commit}`, "--"])).stdout.trim();
++  const match = /^(\d+)\s+(\d+)$/.exec(counts);
++  if (!match) throw new GitToolError("GIT_COMPARISON_FAILED", "Git returned invalid ahead/behind counts.");
++  return { ref, status: "available", commit, ahead: Number(match[1]), behind: Number(match[2]) };
++}
++
++export async function gitFetch(workspaceRoot: string, remote: string): Promise<GitWorkspaceStatus> {
++  const status = await gitStatus(workspaceRoot);
++  await assertRemote(status.repoRoot, remote);
++  await git(status.repoRoot, ["fetch", "--prune", remote]);
++  return gitStatus(workspaceRoot);
++}
++
++export async function gitPull(
++  workspaceRoot: string,
++  remote: string,
++  branch: string,
++): Promise<GitWorkspaceStatus> {
++  const status = await requireCleanWorkspace(workspaceRoot, "pull");
++  await assertRemote(status.repoRoot, remote);
++  await assertBranch(status.repoRoot, branch);
++  try {
++    await git(status.repoRoot, ["pull", "--ff-only", remote, branch]);
++  } catch (error) {
++    throw gitFailure("GIT_PULL_FAILED", "Fast-forward pull failed; no merge or rebase was performed.", status, error);
++  }
++  return gitStatus(workspaceRoot);
++}
++
++export async function gitSwitch(
++  workspaceRoot: string,
++  branch: string,
++  options: { create?: boolean; startPoint?: string } = {},
++): Promise<GitWorkspaceStatus> {
++  const status = await requireCleanWorkspace(workspaceRoot, "switch branches");
++  await assertBranch(status.repoRoot, branch);
++  if (options.create && !branch.startsWith("feature/")) {
++    throw new GitToolError("GIT_FEATURE_BRANCH_REQUIRED", "New branches must use the feature/ prefix.", status);
++  }
++  if (options.startPoint) await assertStartPoint(status.repoRoot, options.startPoint);
++  const args = options.create
++    ? ["switch", "-c", branch, ...(options.startPoint ? [options.startPoint] : [])]
++    : ["switch", branch];
++  try {
++    await git(status.repoRoot, args);
++  } catch (error) {
++    throw gitFailure("GIT_SWITCH_FAILED", "Git could not switch branches.", status, error);
++  }
++  return gitStatus(workspaceRoot);
++}
++
++export async function gitStage(
++  workspaceRoot: string,
++  paths: string[],
++): Promise<GitWorkspaceStatus> {
++  const status = await gitStatus(workspaceRoot);
++  if (paths.length === 0) {
++    throw new GitToolError("GIT_STAGE_PATHS_REQUIRED", "Stage requires one or more workspace-relative paths.", status);
++  }
++  const relativePaths = paths.map((path) => {
++    const absolute = resolveAllowedPath(path, status.repoRoot, [status.repoRoot]);
++    if (!isPathInsideRoot(absolute, status.repoRoot)) {
++      throw new GitToolError("GIT_PATH_OUTSIDE_WORKSPACE", `Path is outside the workspace: ${path}`, status);
++    }
++    return relative(status.repoRoot, absolute) || ".";
++  });
++  await git(status.repoRoot, ["add", "--", ...relativePaths]);
++  return gitStatus(workspaceRoot);
++}
++
++export async function gitCommit(
++  workspaceRoot: string,
++  message: string,
++  policy: GitPolicy,
++): Promise<GitWorkspaceStatus> {
++  const status = await gitStatus(workspaceRoot);
++  assertBranchWritable(status, policy, "commit", policy.allowCommitToProtectedBranches);
++  if (!message.trim()) {
++    throw new GitToolError("GIT_COMMIT_MESSAGE_REQUIRED", "Commit message must not be empty.", status);
++  }
++  try {
++    await git(status.repoRoot, ["commit", "-m", message]);
++  } catch (error) {
++    throw gitFailure("GIT_COMMIT_FAILED", "Git could not create the commit. Stage the intended files first.", status, error);
++  }
++  return gitStatus(workspaceRoot);
++}
++
++export async function gitPush(
++  workspaceRoot: string,
++  remote: string,
++  branch: string | undefined,
++  policy: GitPolicy,
++): Promise<GitWorkspaceStatus> {
++  const status = await gitStatus(workspaceRoot);
++  const targetBranch = branch ?? status.branch;
++  if (!targetBranch) {
++    throw new GitToolError("GIT_BRANCH_REQUIRED", "Push requires a named branch; detached HEAD is not supported.", status);
++  }
++  await assertRemote(status.repoRoot, remote);
++  await assertBranch(status.repoRoot, targetBranch);
++  assertBranchWritable({ ...status, branch: targetBranch }, policy, "push", policy.allowPushToProtectedBranches);
++  try {
++    await git(status.repoRoot, ["push", remote, targetBranch]);
++  } catch (error) {
++    throw gitFailure("GIT_PUSH_FAILED", "Git could not push the branch.", status, error);
++  }
++  return gitStatus(workspaceRoot);
++}
++
++async function requireCleanWorkspace(workspaceRoot: string, operation: string): Promise<GitWorkspaceStatus> {
++  const status = await gitStatus(workspaceRoot);
++  if (!status.workingTreeClean) {
++    throw new GitToolError(
++      "GIT_WORKTREE_DIRTY",
++      `Cannot ${operation}: the working tree has uncommitted changes. No stash, reset, or discard was performed.`,
++      status,
++    );
++  }
++  return status;
++}
++
++async function assertWorkspaceRepository(workspaceRoot: string): Promise<string> {
++  const canonicalWorkspaceRoot = await realpath(workspaceRoot).catch(() => undefined);
++  if (!canonicalWorkspaceRoot) {
++    throw new GitToolError("GIT_WORKSPACE_NOT_FOUND", "Workspace root does not exist.");
++  }
++  let reportedRoot: string;
++  try {
++    reportedRoot = (await git(canonicalWorkspaceRoot, ["rev-parse", "--show-toplevel"])).stdout.trim();
++  } catch {
++    throw new GitToolError("GIT_REPOSITORY_NOT_FOUND", "The opened workspace root is not a Git repository.");
++  }
++  const canonicalGitRoot = await realpath(reportedRoot).catch(() => undefined);
++  if (!canonicalGitRoot || !samePath(canonicalWorkspaceRoot, canonicalGitRoot)) {
++    throw new GitToolError(
++      "GIT_WORKSPACE_ROOT_MISMATCH",
++      "Git operations require the opened workspace root itself to be the repository root; nested, parent, and symlink-escaped repositories are rejected.",
++    );
++  }
++  return canonicalGitRoot;
++}
++
++async function currentBranch(repoRoot: string): Promise<string | undefined> {
++  try {
++    return (await git(repoRoot, ["symbolic-ref", "--quiet", "--short", "HEAD"])).stdout.trim() || undefined;
++  } catch {
++    return undefined;
++  }
++}
++
++async function assertRemote(repoRoot: string, remote: string): Promise<void> {
++  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(remote)) {
++    throw new GitToolError("GIT_INVALID_REMOTE", "Remote name contains unsupported characters.");
++  }
++  try {
++    await git(repoRoot, ["remote", "get-url", remote]);
++  } catch {
++    throw new GitToolError("GIT_REMOTE_NOT_FOUND", `Git remote does not exist: ${remote}`);
++  }
++}
++
++async function assertBranch(repoRoot: string, branch: string): Promise<void> {
++  if (!branch || branch.startsWith("-") || branch.includes("..")) {
++    throw new GitToolError("GIT_INVALID_BRANCH", "Branch name is invalid.");
++  }
++  try {
++    await git(repoRoot, ["check-ref-format", "--branch", branch]);
++  } catch {
++    throw new GitToolError("GIT_INVALID_BRANCH", "Branch name is invalid.");
++  }
++}
++
++async function assertStartPoint(repoRoot: string, startPoint: string): Promise<void> {
++  if (!/^[A-Za-z0-9][A-Za-z0-9._/@-]*$/.test(startPoint)) {
++    throw new GitToolError("GIT_INVALID_START_POINT", "Branch start point is invalid.");
++  }
++  try {
++    await git(repoRoot, ["rev-parse", "--verify", "--quiet", `${startPoint}^{commit}`]);
++  } catch {
++    throw new GitToolError("GIT_INVALID_START_POINT", "Branch start point does not resolve to a commit.");
++  }
++}
++
++function assertBranchWritable(
++  status: GitWorkspaceStatus,
++  policy: GitPolicy,
++  operation: "commit" | "push",
++  permitted: boolean,
++): void {
++  if (status.branch && policy.protectedBranches.includes(status.branch) && !permitted) {
++    throw new GitToolError(
++      "GIT_PROTECTED_BRANCH",
++      `Direct ${operation} to protected branch ${status.branch} is disabled by policy. Use a feature/* branch and a reviewed PR.`,
++      status,
++    );
++  }
++}
++
++function porcelainPaths(output: string): string[] {
++  const entries = output.split("\0").filter(Boolean);
++  const paths: string[] = [];
++  for (let index = 0; index < entries.length; index += 1) {
++    const entry = entries[index]!;
++    if (entry.length < 4) continue;
++    paths.push(entry.slice(3));
++    if (["R", "C"].includes(entry[0]!) || ["R", "C"].includes(entry[1]!)) index += 1;
++  }
++  return paths;
++}
++
++function samePath(left: string, right: string): boolean {
++  return process.platform === "win32" ? left.toLowerCase() === right.toLowerCase() : left === right;
++}
++
++function gitFailure(code: string, message: string, status: GitWorkspaceStatus, error: unknown): GitToolError {
++  const detail = error instanceof Error ? error.message.replace(/\s+/g, " ").trim() : String(error);
++  return new GitToolError(code, `${message} ${detail}`.slice(0, 1_000), status);
++}
+diff --git a/src/logger.ts b/src/logger.ts
+index c183ff64ccedf8e5eb9fd1f16feb0314b524b126..a93ff8d1a6b258b86ab9cafb38b9f28bbe469ccf 100644
+--- a/src/logger.ts
++++ b/src/logger.ts
+@@ -10,7 +10,7 @@ export interface LoggingConfig {
+   assets: boolean;
+   toolCalls: boolean;
+   shellCommands: boolean;
+-  trustProxy: boolean;
++  trustProxy: boolean | "loopback";
+ }
+ 
+ type LogFields = Record<string, unknown>;
+@@ -52,8 +52,8 @@ export function logEvent(
+   }
+ }
+ 
+-export function requestIp(req: Request, trustProxy: boolean): string | undefined {
+-  if (trustProxy) {
++export function requestIp(req: Request, trustProxy: LoggingConfig["trustProxy"]): string | undefined {
++  if (trustProxy === true) {
+     const cfConnectingIp = firstHeaderValue(req.header("cf-connecting-ip"));
+     if (cfConnectingIp) return cfConnectingIp;
+ 
+diff --git a/src/oauth-provider.ts b/src/oauth-provider.ts
+index e650378846d2c2ecf5ab642bb7b9bf2a61b6a922..996d9c0e9ec0c1a0d0d425ca51cffad46eb3fb24 100644
+--- a/src/oauth-provider.ts
++++ b/src/oauth-provider.ts
+@@ -18,6 +18,7 @@ export interface OAuthConfig {
+   refreshTokenTtlSeconds: number;
+   scopes: string[];
+   allowedRedirectHosts: string[];
++  defaultResourceWhenMissing?: boolean;
+ }
+ 
+ interface AuthorizationCodeRecord {
+@@ -132,6 +133,12 @@ export class SingleUserOAuthProvider implements OAuthServerProvider {
+     params: AuthorizationParams,
+     res: Response,
+   ): Promise<void> {
++    // Some OAuth hosts omit RFC 8707 resource indicators (observed with M365
++    // Copilot). Opt in to a single-resource default, and bind it to the approval
++    // form, authorization code, and tokens. Explicit invalid resources still fail.
++    if (params.resource === undefined && this.config.defaultResourceWhenMissing) {
++      params = { ...params, resource: new URL(this.resourceServerUrl.href) };
++    }
+     if (!params.resource || !checkResourceAllowed({ requestedResource: params.resource, configuredResource: this.resourceServerUrl })) {
+       throw new InvalidRequestError("Invalid or missing OAuth resource");
+     }
+diff --git a/src/oauth-resource.test.ts b/src/oauth-resource.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..fee236293551ea9a70fc12c2488c5a0ecba6dcdd
+--- /dev/null
++++ b/src/oauth-resource.test.ts
+@@ -0,0 +1,179 @@
++import assert from "node:assert/strict";
++import { createHash, randomBytes } from "node:crypto";
++import { once } from "node:events";
++import { mkdtemp, rm } from "node:fs/promises";
++import { tmpdir } from "node:os";
++import { join } from "node:path";
++import test, { type TestContext } from "node:test";
++import express from "express";
++import { mcpAuthRouter } from "@modelcontextprotocol/sdk/server/auth/router.js";
++import type { OAuthClientInformationFull, OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
++import { SingleUserOAuthProvider } from "./oauth-provider.js";
++
++const resource = "https://agent.example.com/mcp";
++const redirectUri = "https://teams.microsoft.com/api/platform/v1.0/oAuthRedirect";
++const ownerToken = "test-owner-password-not-a-real-credential";
++
++async function fixture(t: TestContext, defaultResourceWhenMissing: boolean) {
++  const stateDir = await mkdtemp(join(tmpdir(), "devspace-oauth-resource-"));
++  const provider = new SingleUserOAuthProvider({
++    ownerToken,
++    accessTokenTtlSeconds: 3600,
++    refreshTokenTtlSeconds: 2592000,
++    scopes: ["devspace"],
++    allowedRedirectHosts: ["teams.microsoft.com"],
++    defaultResourceWhenMissing,
++  }, new URL(resource), stateDir);
++  const app = express();
++  app.use(mcpAuthRouter({
++    provider,
++    issuerUrl: new URL("https://agent.example.com"),
++    resourceServerUrl: new URL(resource),
++    scopesSupported: ["devspace"],
++  }));
++  const server = app.listen(0, "127.0.0.1");
++  t.after(async () => {
++    server.closeAllConnections();
++    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
++    provider.close();
++    await rm(stateDir, { recursive: true, force: true });
++  });
++  await once(server, "listening");
++  const address = server.address();
++  assert.ok(address && typeof address !== "string");
++  const base = `http://127.0.0.1:${address.port}`;
++  const request = (path: string, init: RequestInit = {}) =>
++    fetch(base + path, { ...init, redirect: "manual", signal: AbortSignal.timeout(5000) });
++  const registration = await request("/register", {
++    method: "POST",
++    headers: { "Content-Type": "application/json" },
++    body: JSON.stringify({
++      client_name: "M365 compatibility test",
++      redirect_uris: [redirectUri],
++      grant_types: ["authorization_code", "refresh_token"],
++      response_types: ["code"],
++      token_endpoint_auth_method: "client_secret_post",
++    }),
++  });
++  assert.equal(registration.status, 201);
++  const client = await registration.json() as OAuthClientInformationFull;
++  assert.ok(client.client_secret);
++  const verifier = randomBytes(32).toString("base64url");
++  const params = new URLSearchParams({
++    response_type: "code",
++    client_id: client.client_id,
++    redirect_uri: redirectUri,
++    state: "test-state",
++    scope: "devspace",
++    code_challenge: createHash("sha256").update(verifier).digest("base64url"),
++    code_challenge_method: "S256",
++  });
++  const form = (path: string, fields: URLSearchParams) => request(path, {
++    method: "POST",
++    headers: { "Content-Type": "application/x-www-form-urlencoded" },
++    body: fields,
++  });
++  return { provider, request, form, client, verifier, params };
++}
++
++function authorizationError(response: Response): string | null {
++  assert.equal(response.status, 302);
++  return new URL(response.headers.get("location")!).searchParams.get("error");
++}
++
++test("resource remains mandatory by default; explicit valid resources still work", async t => {
++  const f = await fixture(t, false);
++  assert.equal(authorizationError(await f.request("/authorize?" + f.params)), "invalid_request");
++  const missingPost = new URLSearchParams(f.params);
++  missingPost.set("owner_token", ownerToken);
++  assert.equal(authorizationError(await f.form("/authorize", missingPost)), "invalid_request");
++  f.params.set("resource", resource);
++  const page = await f.request("/authorize?" + f.params);
++  assert.equal(page.status, 200);
++  assert.match(await page.text(), /Owner password/);
++});
++
++test("opt-in missing resource flow preserves approval, PKCE, client auth and token audience", async t => {
++  const f = await fixture(t, true);
++  const page = await f.request("/authorize?" + f.params);
++  assert.equal(page.status, 200);
++  const html = await page.text();
++  assert.match(html, /Owner password/);
++  assert.ok(html.includes(`name="resource" value="${resource}"`));
++
++  for (const wrongResource of ["https://other.example/mcp", "https://agent.example.com/other"]) {
++    const wrong = new URLSearchParams(f.params);
++    wrong.set("resource", wrongResource);
++    assert.equal(authorizationError(await f.request("/authorize?" + wrong)), "invalid_request");
++    wrong.set("owner_token", ownerToken);
++    assert.equal(authorizationError(await f.form("/authorize", wrong)), "invalid_request");
++  }
++  const wrongScope = new URLSearchParams(f.params);
++  wrongScope.set("scope", "admin");
++  assert.equal(authorizationError(await f.request("/authorize?" + wrongScope)), "invalid_request");
++  const noChallenge = new URLSearchParams(f.params);
++  noChallenge.delete("code_challenge");
++  assert.equal(authorizationError(await f.request("/authorize?" + noChallenge)), "invalid_request");
++  const wrongRedirect = new URLSearchParams(f.params);
++  wrongRedirect.set("redirect_uri", "https://other.example/callback");
++  assert.equal((await f.request("/authorize?" + wrongRedirect)).status, 400);
++
++  const approval = new URLSearchParams(f.params);
++  approval.set("owner_token", "wrong-password");
++  const rejected = await f.form("/authorize", approval);
++  assert.equal(rejected.status, 401);
++  assert.equal(rejected.headers.get("location"), null);
++  approval.set("owner_token", ownerToken);
++  // Also exercise a POST without resource: the code must still carry the audience.
++  const accepted = await f.form("/authorize", approval);
++  assert.equal(accepted.status, 302);
++  const callback = new URL(accepted.headers.get("location")!);
++  assert.equal(callback.origin + callback.pathname, redirectUri);
++  assert.equal(callback.searchParams.get("state"), "test-state");
++  const code = callback.searchParams.get("code");
++  assert.ok(code);
++  const exchange = new URLSearchParams({
++    grant_type: "authorization_code",
++    client_id: f.client.client_id,
++    client_secret: f.client.client_secret!,
++    redirect_uri: redirectUri,
++    code,
++    code_verifier: f.verifier,
++  });
++
++  const wrongSecret = new URLSearchParams(exchange);
++  wrongSecret.set("client_secret", "wrong-secret");
++  const secretRejection = await f.form("/token", wrongSecret);
++  assert.equal(secretRejection.status, 400);
++  assert.equal((await secretRejection.json()).error, "invalid_client");
++  const wrongVerifier = new URLSearchParams(exchange);
++  wrongVerifier.set("code_verifier", "wrong-verifier");
++  assert.equal((await f.form("/token", wrongVerifier)).status, 400);
++  const wrongAudience = new URLSearchParams(exchange);
++  wrongAudience.set("resource", "https://other.example/mcp");
++  assert.equal((await f.form("/token", wrongAudience)).status, 400);
++
++  const tokensResponse = await f.form("/token", exchange);
++  assert.equal(tokensResponse.status, 200);
++  const tokens = await tokensResponse.json() as OAuthTokens;
++  assert.ok(tokens.refresh_token);
++  const auth = await f.provider.verifyAccessToken(tokens.access_token);
++  assert.equal(auth.resource?.href, resource);
++  assert.deepEqual(auth.scopes, ["devspace"]);
++  assert.equal((await f.form("/token", exchange)).status, 400, "authorization code is single-use");
++
++  const refresh = new URLSearchParams({
++    grant_type: "refresh_token",
++    client_id: f.client.client_id,
++    client_secret: f.client.client_secret!,
++    refresh_token: tokens.refresh_token,
++  });
++  const badRefresh = new URLSearchParams(refresh);
++  badRefresh.set("resource", "https://other.example/mcp");
++  assert.equal((await f.form("/token", badRefresh)).status, 400);
++  const refreshedResponse = await f.form("/token", refresh);
++  assert.equal(refreshedResponse.status, 200);
++  const refreshed = await refreshedResponse.json() as OAuthTokens;
++  assert.equal((await f.provider.verifyAccessToken(refreshed.access_token)).resource?.href, resource);
++  assert.equal((await f.form("/token", refresh)).status, 400, "refresh token is rotated");
++});
+diff --git a/src/oauth-store.test.ts b/src/oauth-store.test.ts
+index 225f9fdf5d2a6f2468c635e0cbb84c66faefaafa..bf36831630472021e036d3d39cc6772302d76bee 100644
+--- a/src/oauth-store.test.ts
++++ b/src/oauth-store.test.ts
+@@ -21,6 +21,7 @@ const redirectUri = "https://chatgpt.com/connector_platform_oauth_redirect";
+ 
+ try {
+   await testDatabaseConfiguration(join(root, "database-configuration"));
++  testRedirectHostDiagnostics(join(root, "redirect-diagnostics"));
+   testPersistenceAndTokenHashing(join(root, "persistence"));
+   testExpiredTokenCleanup(join(root, "expiration"));
+   testTransactionalTokenRotation(join(root, "rotation"));
+@@ -58,6 +59,36 @@ async function testDatabaseConfiguration(stateDir: string): Promise<void> {
+   }
+ }
+ 
++function testRedirectHostDiagnostics(stateDir: string): void {
++  const store = new SqliteOAuthStore(stateDir);
++  try {
++    assert.throws(() => store.registerClient({
++      redirect_uris: [
++        redirectUri,
++        "https://private-user:private-password@callback.example.com/private-path?state=private-state#private-fragment",
++      ],
++    }, oauthConfig.allowedRedirectHosts), (error: unknown) => {
++      assert.ok(error instanceof Error);
++      assert.match(error.message, /Rejected host\(s\): callback\.example\.com/);
++      assert.doesNotMatch(error.message, /private-/);
++      assert.match(error.message, /DEVSPACE_OAUTH_ALLOWED_REDIRECT_HOSTS/);
++      return true;
++    });
++    assert.throws(() => store.registerClient({
++      redirect_uris: ["malformed-private-value"],
++    }, oauthConfig.allowedRedirectHosts), /Rejected host\(s\): \(invalid URL\)/);
++    const client = store.registerClient({
++      redirect_uris: ["https://callback.example.com/redirect"],
++    }, ["callback.example.com"]);
++    assert.ok(client.client_id);
++    assert.throws(() => store.registerClient({
++      redirect_uris: ["https://callback.example.com.evil.example/redirect"],
++    }, ["callback.example.com"]), /not allowed/);
++  } finally {
++    store.close();
++  }
++}
++
+ function testPersistenceAndTokenHashing(stateDir: string): void {
+   const accessToken = "access-token-example";
+   const refreshToken = "refresh-token-example";
+diff --git a/src/oauth-store.ts b/src/oauth-store.ts
+index 2567a40e131fb08ca0b4e6174c22dfb92f8dfa54..b8d03eee3f34886d26ac4f929edcfb62eab4264a 100644
+--- a/src/oauth-store.ts
++++ b/src/oauth-store.ts
+@@ -57,8 +57,19 @@ export class SqliteOAuthStore {
+     client: Omit<OAuthClientInformationFull, "client_id" | "client_id_issued_at">,
+     allowedRedirectHosts: string[],
+   ): OAuthClientInformationFull {
+-    if (!client.redirect_uris.every((uri) => redirectHostAllowed(String(uri), allowedRedirectHosts))) {
+-      throw new InvalidRequestError("Client redirect_uri is not allowed for this DevSpace server");
++    const rejectedUris = client.redirect_uris.filter((uri) => !redirectHostAllowed(String(uri), allowedRedirectHosts));
++    if (rejectedUris.length > 0) {
++      // Report only hosts: callback paths, queries and userinfo may contain sensitive data.
++      const rejectedHosts = [...new Set(rejectedUris.map((uri) => {
++        try {
++          return new URL(String(uri)).hostname || "(invalid URL)";
++        } catch {
++          return "(invalid URL)";
++        }
++      }))].slice(0, 8);
++      throw new InvalidRequestError(
++        `Client redirect_uri is not allowed for this DevSpace server. Rejected host(s): ${rejectedHosts.join(", ")}. Configure DEVSPACE_OAUTH_ALLOWED_REDIRECT_HOSTS for the intended client and restart DevSpace.`,
++      );
+     }
+ 
+     const now = Math.floor(Date.now() / 1000);
+diff --git a/src/server.test.ts b/src/server.test.ts
+index cb29d11c4cb1ee9efc68312585fed29cee10c475..0c816ce5cbcb77c7469ddcd826168cbd3ed78dd4 100644
+--- a/src/server.test.ts
++++ b/src/server.test.ts
+@@ -13,12 +13,70 @@ import { buildLocalAgentProviderStatuses } from "./local-agent-catalog.js";
+ import type { SubagentsConfig } from "./local-agent-config.js";
+ import { createReviewCheckpointManager } from "./review-checkpoints.js";
+ import { ProcessSessionManager } from "./process-sessions.js";
+-import { createMcpServer } from "./server.js";
++import { createMcpServer, createServer } from "./server.js";
++import { requestIp } from "./logger.js";
+ import { SqliteWorkspaceStore } from "./workspace-store.js";
+ import { WorkspaceRegistry } from "./workspaces.js";
+ 
+ const execFileAsync = promisify(execFile);
+ 
++test("loopback proxy trust ignores spoofed leftmost headers and preserves OAuth redirect checks", async () => {
++  const root = await mkdtemp(join(tmpdir(), "devspace-proxy-test-"));
++  const config = loadConfig({
++    DEVSPACE_CONFIG_DIR: root,
++    DEVSPACE_STATE_DIR: join(root, "state"),
++    DEVSPACE_ALLOWED_ROOTS: root,
++    DEVSPACE_OAUTH_OWNER_TOKEN: "test-owner-token-that-is-long-enough",
++    DEVSPACE_TRUST_PROXY: "loopback",
++    DEVSPACE_LOG_LEVEL: "silent",
++    DEVSPACE_PUBLIC_BASE_URL: "http://127.0.0.1:3000",
++  });
++  const running = createServer(config);
++  running.app.get("/proxy-test", (req, res) => {
++    res.json({ ip: req.ip, loggedIp: requestIp(req, config.logging.trustProxy) });
++  });
++  const listener = running.app.listen(0, "127.0.0.1");
++  try {
++    await new Promise<void>((resolve, reject) => {
++      listener.once("listening", resolve);
++      listener.once("error", reject);
++    });
++    const address = listener.address();
++    assert.ok(address && typeof address !== "string");
++    const base = `http://127.0.0.1:${address.port}`;
++    assert.equal(running.app.get("trust proxy"), "loopback");
++    const trust = running.app.get("trust proxy fn") as (ip: string) => boolean;
++    assert.equal(trust("127.0.0.1"), true);
++    assert.equal(trust("::1"), true);
++    assert.equal(trust("198.51.100.42"), false);
++    const headers = {
++      "X-Forwarded-For": "203.0.113.99, 198.51.100.42",
++      "CF-Connecting-IP": "203.0.113.99",
++    };
++    const response = await fetch(`${base}/proxy-test`, { headers });
++    assert.deepEqual(await response.json(), {
++      ip: "198.51.100.42",
++      loggedIp: "198.51.100.42",
++    });
++    const registration = await fetch(`${base}/register`, {
++      method: "POST",
++      headers: { ...headers, "Content-Type": "application/json" },
++      body: JSON.stringify({ redirect_uris: ["https://untrusted.example/redirect"] }),
++    });
++    assert.equal(registration.status, 400);
++    const error = await registration.json() as { error: string; error_description: string };
++    assert.equal(error.error, "invalid_request");
++    assert.match(error.error_description, /Rejected host\(s\): untrusted\.example/);
++  } finally {
++    await new Promise<void>((resolve, reject) => {
++      listener.close((error) => error ? reject(error) : resolve());
++      listener.closeAllConnections();
++    });
++    await running.close();
++    await rm(root, { recursive: true, force: true });
++  }
++});
++
+ test("open_workspace keeps lifecycle flags out of model output and preserves complete card metadata", async (t) => {
+   const providerNote = "available";
+   const context = await fixture(t, {
+@@ -80,6 +138,42 @@ test("open_workspace keeps lifecycle flags out of model output and preserves com
+   assert.ok(Array.isArray(card.agents));
+ });
+ 
++test("MCP clients discover and call the controlled Git tools", async (t) => {
++  const context = await fixture(t, { git: true });
++  const tools = await context.client.listTools();
++  const names = new Set(tools.tools.map((tool) => tool.name));
++  for (const name of ["git_status", "git_fetch", "git_pull", "git_switch", "git_stage", "git_commit", "git_push"]) {
++    assert.equal(names.has(name), true, `missing ${name}`);
++  }
++  const opened = structuredContent(await callOpen(context.client, context.project));
++  const result = await context.client.callTool({
++    name: "git_status",
++    arguments: { workspaceId: opened.workspaceId },
++  });
++  assert.equal(structuredContent(result).workingTreeClean, true);
++  assert.equal(structuredContent(result).refsSource, "local");
++  assert.equal((structuredContent(result).comparison as { status: string }).status, "ref_unavailable");
++  assert.match(responseText(result), /no fetch was performed/);
++  const comparison = await context.client.callTool({
++    name: "git_status",
++    arguments: { workspaceId: opened.workspaceId, compareRef: "HEAD" },
++  });
++  assert.equal(comparison.isError, undefined);
++  assert.equal((structuredContent(comparison).comparison as { ahead: number }).ahead, 0);
++  assert.equal((structuredContent(comparison).comparison as { behind: number }).behind, 0);
++  for (const name of ["read", "ls", "grep", "glob", "git_status"]) {
++    assert.equal(tools.tools.find(tool => tool.name === name)?.annotations?.readOnlyHint, true);
++  }
++  for (const name of ["bash", "write", "edit", "git_fetch", "git_push"]) {
++    assert.equal(tools.tools.find(tool => tool.name === name)?.annotations?.readOnlyHint, false);
++  }
++  const outside = await context.client.callTool({
++    name: "git_status",
++    arguments: { workspaceId: "ws_not_opened" },
++  });
++  assert.equal(outside.isError, true);
++});
++
+ test("open_workspace refreshes provider availability for each catalog", async (t) => {
+   let available = false;
+   const context = await fixture(t, {
+diff --git a/src/server.ts b/src/server.ts
+index 16c2010d61a2015e5b8f255411c8226463b6354e..a97feea522c94208475ad510753ec6419a5a2e23 100644
+--- a/src/server.ts
++++ b/src/server.ts
+@@ -23,6 +23,17 @@ import {
+   registerArtifactTools,
+ } from "./artifact-tools.js";
+ import { loadConfig, type ServerConfig, type WidgetMode } from "./config.js";
++import {
++  GitToolError,
++  gitCommit,
++  gitFetch,
++  gitPull,
++  gitPush,
++  gitStage,
++  gitInspect,
++  gitSwitch,
++  type GitWorkspaceStatus,
++} from "./git-tools.js";
+ import {
+   createOpenAIIncomingArtifactAdapter,
+   type IncomingArtifactAdapter,
+@@ -176,6 +187,13 @@ const toolNames = {
+   glob: "glob",
+   ls: "ls",
+   shell: "bash",
++  gitStatus: "git_status",
++  gitFetch: "git_fetch",
++  gitPull: "git_pull",
++  gitSwitch: "git_switch",
++  gitStage: "git_stage",
++  gitCommit: "git_commit",
++  gitPush: "git_push",
+ } as const;
+ 
+ const workspaceIdDescription =
+@@ -203,7 +221,7 @@ function serverInstructions(config: ServerConfig): string {
+       : "";
+ 
+   if (config.toolMode === "codex") {
+-    return `Use DevSpace for coding work. Call ${toolNames.openWorkspace} once for each project folder or isolated worktree, then keep using its workspaceId. During continued work in the same project or worktree, do not call ${toolNames.openWorkspace} again. Open another workspace only when changing projects, switching checkout/worktree mode, creating another isolated worktree, or when the current workspaceId is rejected. Use ${toolNames.read} for direct file reads, apply_patch for all file modifications, exec_command for inspection, tests, builds, and other commands, and write_stdin to poll or interact with running processes. Follow instructions returned by ${toolNames.openWorkspace}; read applicable instruction and skill files before working in their scope.${artifactInstruction}${showChangesInstruction}`;
++    return `Use DevSpace for coding work. Call ${toolNames.openWorkspace} once for each project folder or isolated worktree, then keep using its workspaceId. During continued work in the same project or worktree, do not call ${toolNames.openWorkspace} again. Open another workspace only when changing projects, switching checkout/worktree mode, creating another isolated worktree, or when the current workspaceId is rejected. Use ${toolNames.read} for direct file reads, apply_patch for all file modifications, exec_command for inspection, tests, builds, and other commands, and write_stdin to poll or interact with running processes. Prefer ${toolNames.gitStatus} for status, branch, upstream, and ahead/behind queries using local cached refs. For Git checkout mutations, use ${toolNames.gitFetch}, ${toolNames.gitPull}, ${toolNames.gitSwitch}, ${toolNames.gitStage}, ${toolNames.gitCommit}, and ${toolNames.gitPush}; never use a shell command for those mutations. ${toolNames.gitPull} is fast-forward-only and the Git tools reject dirty checkouts, protected-branch commits/pushes, and paths outside the opened workspace. Follow instructions returned by ${toolNames.openWorkspace}; read applicable instruction and skill files before working in their scope.${artifactInstruction}${showChangesInstruction}`;
+   }
+ 
+   const inspection = config.toolMode !== "full"
+@@ -216,7 +234,7 @@ function serverInstructions(config: ServerConfig): string {
+ 
+   const agentsMd = `Follow instructions returned by ${toolNames.openWorkspace}. Before working under a path listed in availableAgentsFiles, use ${toolNames.read} to inspect that instruction file and follow it. `;
+ 
+-  return `Use DevSpace for coding work. Call ${toolNames.openWorkspace} once for each project folder or isolated worktree, then keep using its workspaceId. During continued work in the same project or worktree, do not call ${toolNames.openWorkspace} again. Open another workspace only when changing projects, switching checkout/worktree mode, creating another isolated worktree, or when the current workspaceId is rejected. ${agentsMd}${skills}${inspection}Prefer ${toolNames.edit} for targeted modifications, ${toolNames.write} only for new files or complete rewrites, and ${toolNames.shell} for tests, builds, git inspection, package scripts, and commands that are better executed by the shell. Do not create or modify files with ${toolNames.shell}; avoid shell redirection, heredocs, tee, sed -i, perl -i, node/python/ruby scripts, or any command whose purpose is to write project files.${artifactInstruction}${showChangesInstruction}`;
++  return `Use DevSpace for coding work. Call ${toolNames.openWorkspace} once for each project folder or isolated worktree, then keep using its workspaceId. During continued work in the same project or worktree, do not call ${toolNames.openWorkspace} again. Open another workspace only when changing projects, switching checkout/worktree mode, creating another isolated worktree, or when the current workspaceId is rejected. ${agentsMd}${skills}${inspection}Use ${toolNames.gitStatus} for repository status, branch, upstream, and ahead/behind comparisons instead of shell commands; open each repository root separately. It uses local cached refs without fetching. Prefer ${toolNames.edit} for targeted modifications, ${toolNames.write} only for new files or complete rewrites, and ${toolNames.shell} for tests, builds, git inspection, package scripts, and commands that are better executed by the shell. Use ${toolNames.gitFetch}, ${toolNames.gitPull}, ${toolNames.gitSwitch}, ${toolNames.gitStage}, ${toolNames.gitCommit}, and ${toolNames.gitPush} for Git checkout mutations, never ${toolNames.shell}. ${toolNames.gitPull} is fast-forward-only; Git tools refuse dirty checkouts, protected-branch commits/pushes, and paths outside the opened workspace. Do not create or modify files with ${toolNames.shell}; avoid shell redirection, heredocs, tee, sed -i, perl -i, node/python/ruby scripts, or any command whose purpose is to write project files.${artifactInstruction}${showChangesInstruction}`;
+ }
+ 
+ function formatVisibleAgent(agent: {
+@@ -704,6 +722,224 @@ function registerCodexProcessTools(
+   );
+ }
+ 
++const gitRefComparisonSchema = z.object({
++  ref: z.string(),
++  status: z.enum(["available", "no_head", "ref_unavailable"]),
++  commit: z.string().optional(),
++  ahead: z.number().int().nonnegative().optional(),
++  behind: z.number().int().nonnegative().optional(),
++});
++
++const gitStatusOutputSchema = resultOutputSchema({
++  // Errors are intentionally returned as structured MCP results as well. Keep
++  // the checkout fields optional so an unknown workspace can return only a
++  // stable error code, while dirty-worktree errors can include their status.
++  code: z.string().optional(),
++  repoRoot: z.string().optional(),
++  branch: z.string().optional(),
++  workingTreeClean: z.boolean().optional(),
++  modifiedFiles: z.array(z.string()).optional(),
++  head: z.string().optional(),
++  upstream: z.string().optional(),
++  upstreamComparison: gitRefComparisonSchema.optional(),
++  comparison: gitRefComparisonSchema.optional(),
++  refsSource: z.literal("local").optional(),
++});
++
++function gitToolResponse(
++  tool: string,
++  workspaceId: string,
++  status: GitWorkspaceStatus,
++  startedAt: number,
++  config: ServerConfig,
++) {
++  const result = [
++    `Repository: ${status.repoRoot}`,
++    `Branch: ${status.branch ?? "detached HEAD"}`,
++    status.workingTreeClean
++      ? "Working tree is clean."
++      : `Working tree has uncommitted changes: ${status.modifiedFiles.join(", ")}`,
++    ...(status.refsSource ? [
++      `HEAD: ${status.head ?? "no commit yet"}`,
++      `Upstream: ${status.upstream ?? "not configured (or detached HEAD)"}`,
++      ...[status.upstreamComparison, status.comparison].flatMap((comparison) => comparison ? [
++        comparison.status === "available"
++          ? `Compared with ${comparison.ref}: ahead ${comparison.ahead}, behind ${comparison.behind}.`
++          : `Compared with ${comparison.ref}: ${comparison.status}.`,
++      ] : []),
++      "Counts use local cached refs; no fetch was performed. Remote changes since the last fetch are not included.",
++    ] : []),
++  ].join("\n");
++  logToolCall(config, {
++    tool,
++    workspaceId,
++    success: true,
++    durationMs: Math.round(performance.now() - startedAt),
++  });
++  return {
++    content: [textBlock(result)],
++    _meta: { tool, card: { workspaceId, root: status.repoRoot, summary: status } },
++    structuredContent: { result, ...status },
++  };
++}
++
++function gitToolErrorResponse(
++  tool: string,
++  workspaceId: string,
++  error: unknown,
++  startedAt: number,
++  config: ServerConfig,
++) {
++  const typed = error instanceof GitToolError ? error : undefined;
++  const message = typed?.message ?? (error instanceof Error ? error.message : String(error));
++  logToolCall(config, {
++    tool,
++    workspaceId,
++    success: false,
++    durationMs: Math.round(performance.now() - startedAt),
++    error: message.slice(0, 240),
++  });
++  return {
++    isError: true as const,
++    content: [textBlock(message)],
++    structuredContent: {
++      result: message,
++      code: typed?.code ?? "GIT_OPERATION_FAILED",
++      ...(typed?.status ?? {}),
++    },
++  };
++}
++
++function registerGitTools(server: McpServer, config: ServerConfig, workspaces: WorkspaceRegistry): void {
++  registerAppTool(server, toolNames.gitStatus, {
++    title: "Git status",
++    description: "Read repository status, current branch, HEAD, upstream, and ahead/behind counts against the upstream and compareRef (default origin/main). Prefer this tool over shell commands for these queries. Uses local cached refs only; never fetches or changes the checkout. Open each repository root as its own workspace.",
++    inputSchema: {
++      workspaceId: z.string().describe(workspaceIdDescription),
++      compareRef: z.string().min(1).max(256).optional().describe("Branch, ref, or commit ID to compare HEAD against; defaults to origin/main. No revision expressions. Counts use locally known refs."),
++    },
++    outputSchema: gitStatusOutputSchema,
++    ...toolWidgetDescriptorMeta(config, "shell"),
++    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
++  }, async ({ workspaceId, compareRef }) => {
++    const startedAt = performance.now();
++    try {
++      return gitToolResponse(toolNames.gitStatus, workspaceId, await gitInspect(workspaces.getWorkspace(workspaceId).root, compareRef), startedAt, config);
++    } catch (error) {
++      return gitToolErrorResponse(toolNames.gitStatus, workspaceId, error, startedAt, config);
++    }
++  });
++
++  registerAppTool(server, toolNames.gitFetch, {
++    title: "Git fetch",
++    description: "Fetch and prune one configured Git remote for an already-open workspace root. Updates remote refs but never modifies checkout files.",
++    inputSchema: { workspaceId: z.string().describe(workspaceIdDescription), remote: z.string().describe("Existing remote name, for example origin.") },
++    outputSchema: gitStatusOutputSchema,
++    ...toolWidgetDescriptorMeta(config, "shell"),
++    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
++  }, async ({ workspaceId, remote }) => {
++    const startedAt = performance.now();
++    try {
++      return gitToolResponse(toolNames.gitFetch, workspaceId, await gitFetch(workspaces.getWorkspace(workspaceId).root, remote), startedAt, config);
++    } catch (error) {
++      return gitToolErrorResponse(toolNames.gitFetch, workspaceId, error, startedAt, config);
++    }
++  });
++
++  registerAppTool(server, toolNames.gitPull, {
++    title: "Git fast-forward pull",
++    description: "Safely synchronize an already-open clean checkout with git pull --ff-only. Refuses dirty worktrees and diverged branches; never creates a merge commit or rebase.",
++    inputSchema: {
++      workspaceId: z.string().describe(workspaceIdDescription),
++      remote: z.string().describe("Existing remote name, for example origin."),
++      branch: z.string().describe("Remote branch to fast-forward from, for example main."),
++    },
++    outputSchema: gitStatusOutputSchema,
++    ...toolWidgetDescriptorMeta(config, "shell"),
++    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
++  }, async ({ workspaceId, remote, branch }) => {
++    const startedAt = performance.now();
++    try {
++      return gitToolResponse(toolNames.gitPull, workspaceId, await gitPull(workspaces.getWorkspace(workspaceId).root, remote, branch), startedAt, config);
++    } catch (error) {
++      return gitToolErrorResponse(toolNames.gitPull, workspaceId, error, startedAt, config);
++    }
++  });
++
++  registerAppTool(server, toolNames.gitSwitch, {
++    title: "Git switch branch",
++    description: "Switch an already-open clean checkout to an existing branch, or explicitly create a feature/* branch. Refuses dirty worktrees and never stashes, resets, or discards changes.",
++    inputSchema: {
++      workspaceId: z.string().describe(workspaceIdDescription),
++      branch: z.string().describe("Existing branch name, or a new feature/* branch when create is true."),
++      create: z.boolean().optional().describe("Create the branch. New branches must begin with feature/."),
++      startPoint: z.string().optional().describe("Optional Git start point, used only when create is true."),
++    },
++    outputSchema: gitStatusOutputSchema,
++    ...toolWidgetDescriptorMeta(config, "shell"),
++    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
++  }, async ({ workspaceId, branch, create, startPoint }) => {
++    const startedAt = performance.now();
++    try {
++      return gitToolResponse(toolNames.gitSwitch, workspaceId, await gitSwitch(workspaces.getWorkspace(workspaceId).root, branch, { create, startPoint }), startedAt, config);
++    } catch (error) {
++      return gitToolErrorResponse(toolNames.gitSwitch, workspaceId, error, startedAt, config);
++    }
++  });
++
++  registerAppTool(server, toolNames.gitStage, {
++    title: "Git stage paths",
++    description: "Stage explicit paths inside an already-open workspace root. Paths outside the workspace are rejected; this tool never stages all changes implicitly.",
++    inputSchema: { workspaceId: z.string().describe(workspaceIdDescription), paths: z.array(z.string()).min(1).describe("One or more explicit workspace-relative file or directory paths to stage.") },
++    outputSchema: gitStatusOutputSchema,
++    ...toolWidgetDescriptorMeta(config, "shell"),
++    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
++  }, async ({ workspaceId, paths }) => {
++    const startedAt = performance.now();
++    try {
++      return gitToolResponse(toolNames.gitStage, workspaceId, await gitStage(workspaces.getWorkspace(workspaceId).root, paths), startedAt, config);
++    } catch (error) {
++      return gitToolErrorResponse(toolNames.gitStage, workspaceId, error, startedAt, config);
++    }
++  });
++
++  registerAppTool(server, toolNames.gitCommit, {
++    title: "Git commit",
++    description: "Create a commit from already staged changes in an opened workspace. Direct commits to protected branches, including main by default, are refused by policy.",
++    inputSchema: { workspaceId: z.string().describe(workspaceIdDescription), message: z.string().min(1).describe("Commit message.") },
++    outputSchema: gitStatusOutputSchema,
++    ...toolWidgetDescriptorMeta(config, "shell"),
++    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
++  }, async ({ workspaceId, message }) => {
++    const startedAt = performance.now();
++    try {
++      return gitToolResponse(toolNames.gitCommit, workspaceId, await gitCommit(workspaces.getWorkspace(workspaceId).root, message, config.git), startedAt, config);
++    } catch (error) {
++      return gitToolErrorResponse(toolNames.gitCommit, workspaceId, error, startedAt, config);
++    }
++  });
++
++  registerAppTool(server, toolNames.gitPush, {
++    title: "Git push",
++    description: "Push a named branch from an opened workspace to an existing remote. Direct pushes to protected branches, including main by default, are refused by policy.",
++    inputSchema: {
++      workspaceId: z.string().describe(workspaceIdDescription),
++      remote: z.string().describe("Existing remote name, for example origin."),
++      branch: z.string().optional().describe("Branch to push. Defaults to the current named branch."),
++    },
++    outputSchema: gitStatusOutputSchema,
++    ...toolWidgetDescriptorMeta(config, "shell"),
++    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
++  }, async ({ workspaceId, remote, branch }) => {
++    const startedAt = performance.now();
++    try {
++      return gitToolResponse(toolNames.gitPush, workspaceId, await gitPush(workspaces.getWorkspace(workspaceId).root, remote, branch, config.git), startedAt, config);
++    } catch (error) {
++      return gitToolErrorResponse(toolNames.gitPush, workspaceId, error, startedAt, config);
++    }
++  });
++}
++
+ export function createMcpServer(
+   config: ServerConfig,
+   workspaces: WorkspaceRegistry,
+@@ -1221,6 +1457,8 @@ export function createMcpServer(
+   );
+   }
+ 
++  registerGitTools(server, config, workspaces);
++
+   if (config.toolMode === "codex") {
+     registerAppTool(
+       server,
+@@ -1568,9 +1806,9 @@ export function createMcpServer(
+     toolNames.shell,
+     {
+       title: "Bash",
+-      description: config.toolMode !== "full"
++      description: `Prefer ${toolNames.gitStatus} for status, branch, upstream, and ahead/behind queries instead of shell commands. ` + (config.toolMode !== "full"
+         ? `Run a shell command in a workspace. Use only for tests, builds, git inspection, package scripts, search, file discovery, and directory inspection. In minimal tool mode, ${toolNames.grep}, ${toolNames.glob}, and ${toolNames.ls} are disabled; use command-line tools such as grep, rg, find, ls, and tree for those read-only inspection actions. Do not use ${toolNames.shell} to create or modify files. Do not use shell redirection, heredocs, tee, sed -i, perl -i, node/python/ruby scripts, or generated scripts to write project files; use ${toolNames.edit} for targeted changes and ${toolNames.write} for new files or full rewrites. Prefer ${toolNames.read} for direct file reads. This is powerful execution and should only be exposed behind strong authentication.`
+-        : `Run a shell command in a workspace. Use only for tests, builds, git inspection, package scripts, and commands that are better executed by the shell. Do not use ${toolNames.shell} to create or modify files. Do not use shell redirection, heredocs, tee, sed -i, perl -i, node/python/ruby scripts, or generated scripts to write project files; use ${toolNames.edit} for targeted changes and ${toolNames.write} for new files or full rewrites. Prefer ${toolNames.read}, ${toolNames.grep}, ${toolNames.glob}, and ${toolNames.ls} for file inspection. This is powerful execution and should only be exposed behind strong authentication.`,
++        : `Run a shell command in a workspace. Use only for tests, builds, git inspection, package scripts, and commands that are better executed by the shell. Do not use ${toolNames.shell} to create or modify files. Do not use shell redirection, heredocs, tee, sed -i, perl -i, node/python/ruby scripts, or generated scripts to write project files; use ${toolNames.edit} for targeted changes and ${toolNames.write} for new files or full rewrites. Prefer ${toolNames.read}, ${toolNames.grep}, ${toolNames.glob}, and ${toolNames.ls} for file inspection. This is powerful execution and should only be exposed behind strong authentication.`),
+       inputSchema: {
+         workspaceId: z
+           .string()
+@@ -1740,7 +1978,7 @@ export function createServer(
+   sessionCleanupTimer.unref();
+ 
+   if (config.logging.trustProxy) {
+-    app.set("trust proxy", true);
++    app.set("trust proxy", config.logging.trustProxy);
+   }
+ 
+   app.use((req, res, next) => {
+diff --git a/src/ui/card-types.ts b/src/ui/card-types.ts
+index cac8b8fd47082de1aac21780e489ef2ea138b567..84cb76c0727fa216730d1acb53d45845a2a61697 100644
+--- a/src/ui/card-types.ts
++++ b/src/ui/card-types.ts
+@@ -12,7 +12,14 @@ export type ToolName =
+   | "grep"
+   | "glob"
+   | "ls"
+-  | "bash";
++  | "bash"
++  | "git_status"
++  | "git_fetch"
++  | "git_pull"
++  | "git_switch"
++  | "git_stage"
++  | "git_commit"
++  | "git_push";
+ 
+ export type HostContext = NonNullable<ReturnType<App["getHostContext"]>>;
+ 
+@@ -106,7 +113,14 @@ export function isToolName(value: unknown): value is ToolName {
+     value === "grep" ||
+     value === "glob" ||
+     value === "ls" ||
+-    value === "bash"
++    value === "bash" ||
++    value === "git_status" ||
++    value === "git_fetch" ||
++    value === "git_pull" ||
++    value === "git_switch" ||
++    value === "git_stage" ||
++    value === "git_commit" ||
++    value === "git_push"
+   );
+ }
+ 
+diff --git a/src/ui/tool-display.ts b/src/ui/tool-display.ts
+index be64e0b00d026b2d1c8916078f151a8c9251cf86..4e91aff7834805136cd9e8b972e37fb51ae43464 100644
+--- a/src/ui/tool-display.ts
++++ b/src/ui/tool-display.ts
+@@ -116,6 +116,19 @@ export function getToolDisplay(card: ToolResultCard): ToolDisplay {
+         tone: "review",
+       };
+     }
++    case "git_status":
++    case "git_fetch":
++    case "git_pull":
++    case "git_switch":
++    case "git_stage":
++    case "git_commit":
++    case "git_push":
++      return {
++        icon: toolIcons.gitBranch,
++        title: gitToolTitle(card.tool),
++        label: card.root,
++        tone: "workspace",
++      };
+   }
+ }
+ 
+@@ -165,6 +178,19 @@ function workspaceTitle(card: ToolResultCard): string {
+   return `${card.workspaceReused ? "Reused" : "Opened"} workspace`;
+ }
+ 
++function gitToolTitle(tool: ToolResultCard["tool"]): string {
++  const titles: Partial<Record<ToolResultCard["tool"], string>> = {
++    git_status: "Git status",
++    git_fetch: "Fetched Git remote",
++    git_pull: "Fast-forwarded Git branch",
++    git_switch: "Switched Git branch",
++    git_stage: "Staged Git paths",
++    git_commit: "Created Git commit",
++    git_push: "Pushed Git branch",
++  };
++  return titles[tool] ?? "Git operation";
++}
++
+ function singleFilePath(card: ToolResultCard): string | undefined {
+   if (card.files?.length === 1) {
+     return getFileChangePathDisplay(card.files[0])?.title ?? card.path;
+diff --git a/src/user-config.ts b/src/user-config.ts
+index 98d05ac68488b8f3b01dd002235f6701f9a0c17b..16df8c17db6d4c5dbd025a0fe519cbaf1ea8b0cd 100644
+--- a/src/user-config.ts
++++ b/src/user-config.ts
+@@ -22,6 +22,9 @@ export interface DevspaceUserConfig {
+   artifactMaxFileBytes?: number;
+   agentDir?: string;
+   subagents?: StoredSubagentsConfig;
++  git?: {
++    protectedBranches?: string[];
++  };
+ }
+ 
+ export interface DevspaceAuthConfig {
